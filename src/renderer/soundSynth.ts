@@ -2,19 +2,31 @@ import { SoundId } from '../core/types';
 
 export class SoundSynth {
   private ctx: AudioContext | null = null;
+  private recordDest: MediaStreamAudioDestinationNode | null = null;
   public muted = false;
 
-  private ensureCtx(): AudioContext | null {
+  ensureReady(): AudioContext | null {
     if (this.muted || typeof window === 'undefined') return null;
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    const AudioCtx =
+      window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtx) return null;
-    if (!this.ctx) this.ctx = new AudioCtx();
+    if (!this.ctx) {
+      this.ctx = new AudioCtx();
+      if (typeof this.ctx.createMediaStreamDestination === 'function') {
+        this.recordDest = this.ctx.createMediaStreamDestination();
+      }
+    }
     if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
     return this.ctx;
   }
 
+  getAudioStream(): MediaStream | null {
+    this.ensureReady();
+    return this.recordDest?.stream ?? null;
+  }
+
   play(id: SoundId): void {
-    const ctx = this.ensureCtx();
+    const ctx = this.ensureReady();
     if (!ctx) return;
     try {
       const now = ctx.currentTime;
@@ -22,6 +34,7 @@ export class SoundSynth {
       const gain = ctx.createGain();
       osc.connect(gain);
       gain.connect(ctx.destination);
+      if (this.recordDest) gain.connect(this.recordDest);
 
       if (id === 'spawn_pop') {
         osc.type = 'sine';

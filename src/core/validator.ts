@@ -69,11 +69,15 @@ export function validateScenario(
         checkAnchor(idx, 'spawn.at', s.at);
       }
     }
+    if (step.pulse) checkAnchor(idx, 'pulse.at', step.pulse.at);
     if (step.move) {
       if (!spawnedIds.has(step.move.entity)) {
         issues.push({ stepIndex: idx, field: 'move.entity', message: `الوحدة "${step.move.entity}" لم تُنشأ قبل هذا الأمر` });
       }
       checkAnchor(idx, 'move.to', step.move.to);
+    }
+    if (step.remove && !spawnedIds.has(step.remove.entity)) {
+      issues.push({ stepIndex: idx, field: 'remove.entity', message: `الوحدة "${step.remove.entity}" غير موجودة للإزالة` });
     }
     if (step.construct) {
       if (step.construct.id) spawnedIds.add(step.construct.id);
@@ -91,6 +95,16 @@ export function validateScenario(
         field: 'zone.id',
         message: `منطقة غير معروفة "${step.zone.id}"${hint ? ` — هل تقصد "${hint}"؟` : ''}`
       });
+    }
+    if (step.callout) {
+      const t = step.callout.target;
+      if (!map.anchors[t] && !spawnedIds.has(t)) {
+        issues.push({
+          stepIndex: idx,
+          field: 'callout.target',
+          message: `الهدف "${t}" ليس مرسى في الخريطة ولا وحدة منشأة`
+        });
+      }
     }
   });
 

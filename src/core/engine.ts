@@ -2,10 +2,12 @@ import { findPath } from './pathfinding';
 import {
   ActorPack,
   ArrowState,
+  CalloutState,
   CameraTarget,
   EntityState,
   MapPack,
   Order,
+  PulseState,
   ScenarioFile,
   ScenarioStep,
   SoundId,
@@ -34,13 +36,17 @@ export class StudioEngine {
   public entities = new Map<string, EntityState>();
   public arrows = new Map<string, ArrowState>();
   public zones = new Map<string, ZoneVisualState>();
+  public callouts = new Map<string, CalloutState>();
+  public pulses: PulseState[] = [];
   public caption = '';
   public cameraTarget: CameraTarget | null = null;
 
   private executedSteps = new Set<number>();
   private orderQueue: Order[] = [];
   private soundListeners: Array<(id: SoundId) => void> = [];
+  private blockedListeners: Array<(entity: EntityState) => void> = [];
   private autoCounter = 0;
+  private silent = false;
 
   constructor(
     public map: MapPack,
@@ -57,7 +63,15 @@ export class StudioEngine {
     };
   }
 
+  onMoveBlocked(cb: (entity: EntityState) => void): () => void {
+    this.blockedListeners.push(cb);
+    return () => {
+      this.blockedListeners = this.blockedListeners.filter((l) => l !== cb);
+    };
+  }
+
   private emitSound(id: SoundId): void {
+    if (this.silent) return;
     this.soundListeners.forEach((cb) => cb(id));
   }
 
@@ -69,11 +83,29 @@ export class StudioEngine {
     return this.scenario.timeline?.length ?? 0;
   }
 
+  estimateDurationSec(): number {
+    let maxAt = 18;
+    for (const st of this.scenario.timeline ?? []) {
+      if (st.at) maxAt = Math.max(maxAt, parseSec(st.at) + 8);
+    }
+    return maxAt;
+  }
+
+  seekToTick(targetTick: number): void {
+    const clamped = Math.max(0, Math.floor(targetTick));
+    if (clamped < this.tick) this.reset();
+    this.silent = true;
+    while (this.tick < clamped) this.step();
+    this.silent = false;
+  }
+
   reset(): void {
     this.tick = 0;
     this.entities.clear();
     this.arrows.clear();
     this.zones.clear();
+    this.callouts.clear();
+    this.pulses = [];
     this.executedSteps.clear();
     this.orderQueue = [];
     this.caption = '';
@@ -90,12 +122,15 @@ export class StudioEngine {
     this.orderQueue.push(order);
   }
 
+  flushOrders(): void {
+    this.processOrders();
+  }
+
   step(): void {
     this.tick++;
     this.evaluateTimeline();
     this.processOrders();
 
-    // تحديث الكيانات
     for (const e of this.entities.values()) {
       e.prevX = e.x;
       e.prevY = e.y;
@@ -139,12 +174,10 @@ export class StudioEngine {
       }
     }
 
-    // تحديث الأسهم التدريجية
     for (const a of this.arrows.values()) {
       if (a.progress < 1) a.progress = Math.min(1, a.progress + a.rate * DT);
     }
 
-    // تحديث تلوين المناطق
     for (const z of this.zones.values()) {
       if (z.opacity !== z.targetOpacity) {
         const diff = z.targetOpacity - z.opacity;
@@ -152,6 +185,18 @@ export class StudioEngine {
         z.opacity = Math.abs(diff) <= step ? z.targetOpacity : z.opacity + Math.sign(diff) * step;
       }
     }
+
+    for (const [id, c] of this.callouts) {
+      if (c.remainingTicks !== null) {
+        c.remainingTicks--;
+        if (c.remainingTicks <= 0) this.callouts.delete(id);
+      }
+    }
+
+    for (const p of this.pulses) {
+      p.progress += DT * 0.9;
+    }
+    this.pulses = this.pulses.filter((p) => p.progress < 1);
   }
 
   private evaluateTimeline(): void {
@@ -208,6 +253,10 @@ export class StudioEngine {
       if (pt) this.dispatchOrder({ type: 'move', entityId: st.move.entity, to: pt });
     }
 
+    if (st.remove) {
+      this.dispatchOrder({ type: 'remove', entityId: st.remove.entity });
+    }
+
     if (st.construct) {
       const pt = this.map.anchors[st.construct.at];
       if (pt) {
@@ -246,6 +295,30 @@ export class StudioEngine {
         z.color = st.zone.color;
         z.targetOpacity = st.zone.opacity ?? 0.35;
         z.rate = Math.abs(z.targetOpacity - z.opacity) / dur || 1;
+      }
+    }
+
+    if (st.callout) {
+      const dur = st.callout.duration ? Math.round(parseSec(st.callout.duration) * TICK_RATE) : null;
+      this.callouts.set(st.callout.id, {
+        id: st.callout.id,
+        target: st.callout.target,
+        text: st.callout.text,
+        color: st.callout.color ?? '#0ea5e9',
+        remainingTicks: dur
+      });
+    }
+
+    if (st.pulse) {
+      const pt = this.map.anchors[st.pulse.at];
+      if (pt) {
+        this.pulses.push({
+          x: pt.x,
+          y: pt.y,
+          color: st.pulse.color ?? '#ef4444',
+          maxRadius: st.pulse.radius ?? 75,
+          progress: 0
+        });
       }
     }
   }
@@ -307,9 +380,16 @@ export class StudioEngine {
       } else if (ord.type === 'move') {
         const ent = this.entities.get(ord.entityId);
         if (!ent || ent.kind === 'building') continue;
+        const path = findPath(this.map, { x: ent.x, y: ent.y }, ord.to, ent.domain);
+        if (path.length === 0) {
+          if (!this.silent) this.blockedListeners.forEach((cb) => cb(ent));
+          continue;
+        }
         ent.arrivedTick = null;
-        ent.path = findPath(this.map, { x: ent.x, y: ent.y }, ord.to, ent.domain);
+        ent.path = path;
         this.emitSound('move_order');
+      } else if (ord.type === 'remove') {
+        this.entities.delete(ord.entityId);
       }
     }
   }

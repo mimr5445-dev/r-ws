@@ -13,6 +13,9 @@
   pre,
   textarea.font-mono {
     font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    direction: ltr;
+    unicode-bidi: plaintext;
+    text-align: left;
   }
 }
 

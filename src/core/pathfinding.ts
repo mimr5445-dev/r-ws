@@ -2,18 +2,24 @@ import { Domain, MapPack, NavCell, Point } from './types';
 
 export function isWalkable(cell: NavCell, domain: Domain): boolean {
   if (domain === 'air') return true;
-  if (domain === 'land') return cell === 0;
-  if (domain === 'sea') return cell === 1;
+  if (domain === 'land') return cell === 0 || cell === 3;
+  if (domain === 'sea') return cell === 1 || cell === 3;
   return false;
 }
 
-function findNearestWalkable(map: MapPack, gx: number, gy: number, domain: Domain): [number, number] | null {
+export function findNearestWalkable(
+  map: MapPack,
+  gx: number,
+  gy: number,
+  domain: Domain,
+  maxRadius: number
+): [number, number] | null {
   const clamp = (v: number, max: number) => Math.max(0, Math.min(max - 1, v));
   const sx = clamp(gx, map.cols);
   const sy = clamp(gy, map.rows);
   if (isWalkable(map.navGrid[sy * map.cols + sx], domain)) return [sx, sy];
 
-  for (let r = 1; r <= 12; r++) {
+  for (let r = 1; r <= maxRadius; r++) {
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
         const nx = sx + dx;
@@ -27,15 +33,64 @@ function findNearestWalkable(map: MapPack, gx: number, gy: number, domain: Domai
   return null;
 }
 
+export function isPointNearWalkable(map: MapPack, pt: Point, domain: Domain, maxRadius = 2): boolean {
+  if (domain === 'air') return true;
+  const gx = Math.floor(pt.x / map.cellSize);
+  const gy = Math.floor(pt.y / map.cellSize);
+  return findNearestWalkable(map, gx, gy, domain, maxRadius) !== null;
+}
+
+class MinHeap {
+  private data: number[] = [];
+  constructor(private score: Float32Array) {}
+
+  get size(): number {
+    return this.data.length;
+  }
+
+  push(node: number): void {
+    this.data.push(node);
+    let i = this.data.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (this.score[this.data[p]] <= this.score[this.data[i]]) break;
+      [this.data[p], this.data[i]] = [this.data[i], this.data[p]];
+      i = p;
+    }
+  }
+
+  pop(): number {
+    const top = this.data[0];
+    const last = this.data.pop()!;
+    if (this.data.length > 0) {
+      this.data[0] = last;
+      let i = 0;
+      const n = this.data.length;
+      while (true) {
+        let smallest = i;
+        const l = i * 2 + 1;
+        const r = l + 1;
+        if (l < n && this.score[this.data[l]] < this.score[this.data[smallest]]) smallest = l;
+        if (r < n && this.score[this.data[r]] < this.score[this.data[smallest]]) smallest = r;
+        if (smallest === i) break;
+        [this.data[i], this.data[smallest]] = [this.data[smallest], this.data[i]];
+        i = smallest;
+      }
+    }
+    return top;
+  }
+}
+
 export function findPath(map: MapPack, from: Point, to: Point, domain: Domain): Point[] {
   if (domain === 'air') return [{ ...to }];
 
   const startRaw: [number, number] = [Math.floor(from.x / map.cellSize), Math.floor(from.y / map.cellSize)];
   const endRaw: [number, number] = [Math.floor(to.x / map.cellSize), Math.floor(to.y / map.cellSize)];
 
-  const start = findNearestWalkable(map, startRaw[0], startRaw[1], domain);
-  const goal = findNearestWalkable(map, endRaw[0], endRaw[1], domain);
-  if (!start || !goal) return [{ ...to }];
+  const start = findNearestWalkable(map, startRaw[0], startRaw[1], domain, 4);
+  // للهدف: نسمح بالتقاط الساحل القريب جدًا فقط (خليتين)، أما وسط البحر للدبابة فيُرفض!
+  const goal = findNearestWalkable(map, endRaw[0], endRaw[1], domain, 2);
+  if (!start || !goal) return [];
 
   const total = map.cols * map.rows;
   const gScore = new Float32Array(total).fill(Infinity);
@@ -43,7 +98,7 @@ export function findPath(map: MapPack, from: Point, to: Point, domain: Domain): 
   const cameFrom = new Int32Array(total).fill(-1);
   const closed = new Uint8Array(total);
   const inOpen = new Uint8Array(total);
-  const open: number[] = [];
+  const heap = new MinHeap(fScore);
 
   const idx = (x: number, y: number) => y * map.cols + x;
   const sIdx = idx(start[0], start[1]);
@@ -51,23 +106,22 @@ export function findPath(map: MapPack, from: Point, to: Point, domain: Domain): 
 
   gScore[sIdx] = 0;
   fScore[sIdx] = Math.hypot(goal[0] - start[0], goal[1] - start[1]);
-  open.push(sIdx);
+  heap.push(sIdx);
   inOpen[sIdx] = 1;
 
   const dirs = [
-    [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
-    [1, 1, 1.414], [-1, 1, 1.414], [1, -1, 1.414], [-1, -1, 1.414]
+    [1, 0, 1],
+    [-1, 0, 1],
+    [0, 1, 1],
+    [0, -1, 1],
+    [1, 1, 1.414],
+    [-1, 1, 1.414],
+    [1, -1, 1.414],
+    [-1, -1, 1.414]
   ];
 
-  while (open.length > 0) {
-    let bestPos = 0;
-    for (let i = 1; i < open.length; i++) {
-      if (fScore[open[i]] < fScore[open[bestPos]]) bestPos = i;
-    }
-    const curr = open[bestPos];
-    open.splice(bestPos, 1);
-    inOpen[curr] = 0;
-
+  while (heap.size > 0) {
+    const curr = heap.pop();
     if (curr === gIdx) {
       const pts: Point[] = [];
       let c = curr;
@@ -78,20 +132,21 @@ export function findPath(map: MapPack, from: Point, to: Point, domain: Domain): 
         c = cameFrom[c];
       }
       pts.reverse();
-      const goalWorld = {
-        x: (goal[0] + 0.5) * map.cellSize,
-        y: (goal[1] + 0.5) * map.cellSize
-      };
-      // If requested destination itself is walkable, land accurately on exact `to`, otherwise stop at nearest walkable goal center
-      const rawGoalWalkable =
+      const rawGoalValid =
         endRaw[0] >= 0 &&
         endRaw[0] < map.cols &&
         endRaw[1] >= 0 &&
         endRaw[1] < map.rows &&
         isWalkable(map.navGrid[idx(endRaw[0], endRaw[1])], domain);
-      const finalPt = rawGoalWalkable ? { ...to } : goalWorld;
-      if (pts.length > 0) pts[pts.length - 1] = finalPt;
-      else pts.push(finalPt);
+      const goalWorld = {
+        x: (goal[0] + 0.5) * map.cellSize,
+        y: (goal[1] + 0.5) * map.cellSize
+      };
+      if (pts.length > 0) {
+        pts[pts.length - 1] = rawGoalValid ? { ...to } : goalWorld;
+      } else {
+        pts.push(rawGoalValid ? { ...to } : goalWorld);
+      }
       return pts;
     }
 
@@ -104,9 +159,7 @@ export function findPath(map: MapPack, from: Point, to: Point, domain: Domain): 
       const ny = cy + dy;
       if (nx < 0 || ny < 0 || nx >= map.cols || ny >= map.rows) continue;
       const nIdx = idx(nx, ny);
-      if (closed[nIdx]) continue;
-      if (!isWalkable(map.navGrid[nIdx], domain)) continue;
-      // منع القطع القطري عبر زوايا العوائق
+      if (closed[nIdx] || !isWalkable(map.navGrid[nIdx], domain)) continue;
       if (dx !== 0 && dy !== 0) {
         if (!isWalkable(map.navGrid[idx(cx + dx, cy)], domain) || !isWalkable(map.navGrid[idx(cx, cy + dy)], domain)) {
           continue;
@@ -118,11 +171,12 @@ export function findPath(map: MapPack, from: Point, to: Point, domain: Domain): 
         gScore[nIdx] = tentative;
         fScore[nIdx] = tentative + Math.hypot(goal[0] - nx, goal[1] - ny);
         if (!inOpen[nIdx]) {
-          open.push(nIdx);
+          heap.push(nIdx);
           inOpen[nIdx] = 1;
         }
       }
     }
   }
-  return [{ ...to }];
+
+  return []; // لا يوجد مسار متصل (مثلًا بين قارتين عبر البحر)
 }
