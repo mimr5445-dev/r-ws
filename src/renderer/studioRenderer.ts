@@ -130,8 +130,10 @@ export class StudioRenderer {
   private lastPointer: Point = { x: 0, y: 0 };
   private mapWidth = 1200;
   private mapHeight = 800;
+  private lastUnitFactor = 1;
   private currentHitTest?: (pt: Point) => string | null;
 
+  public userUnitScale = 1.0;
   public selectedEntityId: string | null = null;
   public hoveredRegionId: string | null = null;
   public selectedRegionId: string | null = null;
@@ -143,6 +145,10 @@ export class StudioRenderer {
     paintActive: false,
     draftZonePoints: []
   };
+
+  getCameraState(): { x: number; y: number; zoom: number } {
+    return { x: this.camX, y: this.camY, zoom: this.camZoom };
+  }
 
   public onMapClick?: (worldPt: Point, clickedEntityId: string | null) => void;
   public onMapPaint?: (worldPt: Point) => void;
@@ -293,8 +299,9 @@ export class StudioRenderer {
   }
 
   private pickEntity(wx: number, wy: number): string | null {
+    const hitRadius = Math.max(16 / this.camZoom, 24 * this.lastUnitFactor);
     for (const [id, view] of this.entityViews) {
-      if (Math.hypot(view.container.x - wx, view.container.y - wy) <= 30) return id;
+      if (Math.hypot(view.container.x - wx, view.container.y - wy) <= hitRadius) return id;
     }
     return null;
   }
@@ -602,6 +609,10 @@ export class StudioRenderer {
       }
     }
 
+    const mapMul = engine.map.unitScaleMultiplier ?? 1;
+    const zoomComp = Math.max(0.45, Math.min(1.25, 1 / Math.pow(this.camZoom, 0.4)));
+    this.lastUnitFactor = mapMul * this.userUnitScale * zoomComp;
+
     for (const ent of engine.entities.values()) {
       let view = this.entityViews.get(ent.id);
       if (!view) {
@@ -612,6 +623,7 @@ export class StudioRenderer {
       const x = lerp(ent.prevX, ent.x, alpha);
       const y = lerp(ent.prevY, ent.y, alpha);
       view.container.position.set(x, y);
+      view.container.scale.set(this.lastUnitFactor);
 
       if (ent.kind === 'person') {
         const bob = ent.isMoving ? Math.abs(Math.sin(timeSec * 12)) * 3 : 0;
@@ -623,13 +635,13 @@ export class StudioRenderer {
 
       if (isPlaying && ent.isMoving && Math.random() < 0.35 && this.particles.length < 180) {
         this.particles.push({
-          x: x - Math.cos(ent.angle) * (ent.radius * 0.7),
-          y: y - Math.sin(ent.angle) * (ent.radius * 0.7),
-          vx: (Math.random() - 0.5) * 14,
-          vy: (Math.random() - 0.5) * 14,
+          x: x - Math.cos(ent.angle) * (ent.radius * 0.7 * this.lastUnitFactor),
+          y: y - Math.sin(ent.angle) * (ent.radius * 0.7 * this.lastUnitFactor),
+          vx: (Math.random() - 0.5) * 14 * this.lastUnitFactor,
+          vy: (Math.random() - 0.5) * 14 * this.lastUnitFactor,
           life: 0.65,
           maxLife: 0.65,
-          radius: ent.domain === 'sea' ? 4.2 : 3,
+          radius: (ent.domain === 'sea' ? 4.2 : 3) * this.lastUnitFactor,
           color: ent.domain === 'sea' ? 0xbae6fd : 0xd6d3d1
         });
       }
@@ -669,14 +681,16 @@ export class StudioRenderer {
         this.calloutViews.delete(id);
       }
     }
+    const calloutScale = Math.max(0.42, Math.min(1.15, 1 / Math.pow(Math.max(0.25, this.camZoom), 0.78)));
     for (const c of engine.callouts.values()) {
       const targetEnt = engine.entities.get(c.target);
       const targetAnchor = engine.map.anchors[c.target];
       const tx = targetEnt ? lerp(targetEnt.prevX, targetEnt.x, alpha) : targetAnchor?.x;
+      const entOffset = Math.max(10, 26 * this.lastUnitFactor) + 14 * calloutScale;
       const ty = targetEnt
-        ? lerp(targetEnt.prevY, targetEnt.y, alpha) - 38
+        ? lerp(targetEnt.prevY, targetEnt.y, alpha) - entOffset
         : targetAnchor
-          ? targetAnchor.y - 46
+          ? targetAnchor.y - 28 * calloutScale
           : undefined;
       if (tx === undefined || ty === undefined) continue;
 
@@ -712,6 +726,7 @@ export class StudioRenderer {
           .stroke({ width: 1.5, color: c.color });
       }
       cv.container.position.set(tx, ty);
+      cv.container.scale.set(calloutScale);
     }
   }
 

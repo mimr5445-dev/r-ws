@@ -1,15 +1,14 @@
-import { ActorPack, ActorTemplate, MapPack, PackBundle } from '../core/types';
+import { ActorPack, ActorTemplate, MapPack, PackBundle, SavedScenarioRecord } from '../core/types';
 import { buildWorldMapPack } from '../maps/worldGeoEngine';
+import { studioDb } from '../storage/studioDb';
 import { DEMO_ACTORS, DEMO_MAPS, TEMPLATES } from './demoPacks';
 
 export const ACTOR_TEMPLATES: Record<string, ActorTemplate> = TEMPLATES;
 
-const STORAGE_KEY = 'rw_studio_custom_packs_v1';
-
 export class PackRegistry {
   public maps: Record<string, MapPack> = {};
   public actors: Record<string, ActorPack> = {};
-  private customBundle: PackBundle = { maps: [], actors: [] };
+  public scenarios: SavedScenarioRecord[] = [];
 
   constructor(private useStorage = true) {
     for (const [k, m] of Object.entries(DEMO_MAPS)) {
@@ -27,64 +26,80 @@ export class PackRegistry {
     for (const [k, a] of Object.entries(DEMO_ACTORS)) {
       this.actors[k] = { ...a };
     }
-    if (this.useStorage) {
-      this.loadFromStorage();
-    }
   }
 
-  private loadFromStorage(): void {
-    try {
-      if (typeof localStorage === 'undefined') return;
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as PackBundle;
-      this.customBundle = { maps: parsed.maps ?? [], actors: parsed.actors ?? [] };
-      this.applyBundle(this.customBundle);
-    } catch {
-      // تجاهل البيانات التالفة
+  async init(presetScenarios: SavedScenarioRecord[]): Promise<void> {
+    if (typeof document !== 'undefined' && !this.maps.world_live) {
+      const worldMap = buildWorldMapPack();
+      this.maps[worldMap.id] = worldMap;
     }
+
+    if (!this.useStorage) {
+      this.scenarios = [...presetScenarios];
+      return;
+    }
+
+    const savedMaps = await studioDb.loadAllMaps();
+    for (const m of savedMaps) {
+      // تحديث خريطة العالم من النسخة الحية مع الاحتفاظ بالخرائط المخصصة والدول المحفوظة
+      if (m.id !== 'world_live') this.maps[m.id] = m;
+    }
+
+    const savedActors = await studioDb.loadAllActors();
+    for (const a of savedActors) this.applyActor(a);
+
+    const savedScenarios = await studioDb.loadAllScenarios();
+    const existingIds = new Set(savedScenarios.map((s) => s.id));
+    for (const p of presetScenarios) {
+      if (!existingIds.has(p.id)) {
+        await studioDb.saveScenario(p);
+        savedScenarios.push(p);
+      }
+    }
+    this.scenarios = savedScenarios.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  private saveToStorage(): void {
-    try {
-      if (!this.useStorage || typeof localStorage === 'undefined') return;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.customBundle));
-    } catch {
-      // Ignore quota errors
-    }
+  private applyActor(a: ActorPack): void {
+    const tpl = a.extends ? ACTOR_TEMPLATES[a.extends] : undefined;
+    this.actors[a.id] = { ...(tpl ?? ACTOR_TEMPLATES._person), ...a };
   }
 
-  applyBundle(bundle: PackBundle): void {
-    for (const m of bundle.maps ?? []) {
-      this.maps[m.id] = m;
-    }
-    for (const a of bundle.actors ?? []) {
-      const tpl = a.extends ? ACTOR_TEMPLATES[a.extends] : undefined;
-      this.actors[a.id] = { ...(tpl ?? ACTOR_TEMPLATES._person), ...a };
-    }
-  }
-
-  saveCustomMap(map: MapPack): void {
+  async saveCustomMap(map: MapPack): Promise<void> {
     this.maps[map.id] = map;
-    const { hitTest: _ht, ...serializable } = map;
-    this.customBundle.maps = (this.customBundle.maps ?? []).filter((m) => m.id !== map.id);
-    this.customBundle.maps.push(serializable);
-    this.saveToStorage();
+    if (this.useStorage) {
+      await studioDb.saveMap(map);
+    }
   }
 
-  saveCustomActor(actor: Partial<ActorPack> & { id: string; label: string; svg: string }): ActorPack {
+  async saveCustomActor(
+    actor: Partial<ActorPack> & { id: string; label: string; svg: string }
+  ): Promise<ActorPack> {
     const tpl = actor.extends ? ACTOR_TEMPLATES[actor.extends] : ACTOR_TEMPLATES._person;
     const resolved: ActorPack = { ...(tpl ?? ACTOR_TEMPLATES._person), ...actor };
     this.actors[resolved.id] = resolved;
-    this.customBundle.actors = (this.customBundle.actors ?? []).filter((a) => a.id !== resolved.id);
-    this.customBundle.actors.push(resolved);
-    this.saveToStorage();
+    if (this.useStorage) {
+      await studioDb.saveActor(resolved);
+    }
     return resolved;
   }
 
-  importBundle(bundle: PackBundle): { mapsAdded: number; actorsAdded: number } {
-    for (const m of bundle.maps ?? []) this.saveCustomMap(m);
-    for (const a of bundle.actors ?? []) this.saveCustomActor(a);
+  async saveScenarioRecord(rec: SavedScenarioRecord): Promise<void> {
+    if (this.useStorage) {
+      await studioDb.saveScenario(rec);
+    }
+    this.scenarios = [rec, ...this.scenarios.filter((s) => s.id !== rec.id)].sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async deleteScenarioRecord(id: string): Promise<void> {
+    if (this.useStorage) {
+      await studioDb.deleteScenario(id);
+    }
+    this.scenarios = this.scenarios.filter((s) => s.id !== id);
+  }
+
+  async importBundle(bundle: PackBundle): Promise<{ mapsAdded: number; actorsAdded: number }> {
+    for (const m of bundle.maps ?? []) await this.saveCustomMap(m);
+    for (const a of bundle.actors ?? []) await this.saveCustomActor(a);
     return { mapsAdded: bundle.maps?.length ?? 0, actorsAdded: bundle.actors?.length ?? 0 };
   }
 

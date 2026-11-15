@@ -1,4 +1,4 @@
-import { ActorPack, MapPack, ScenarioFile, ValidationIssue } from './types';
+import { ActorPack, MapPack, PointRef, ScenarioFile, ValidationIssue } from './types';
 
 function closestKey(target: string, keys: string[]): string | null {
   let best: string | null = null;
@@ -26,7 +26,7 @@ export function validateScenario(
     return issues;
   }
   if (!map) {
-    issues.push({ stepIndex: -1, field: 'meta.map', message: `الخريطة "${scenario.meta.map}" غير موجودة في الحزم` });
+    issues.push({ stepIndex: -1, field: 'meta.map', message: `الخريطة "${scenario.meta.map}" غير موجودة في قاعدة البيانات` });
     return issues;
   }
 
@@ -35,14 +35,22 @@ export function validateScenario(
   const actorKeys = Object.keys(actors);
   const spawnedIds = new Set<string>();
 
-  const checkAnchor = (stepIdx: number, field: string, name: string) => {
-    if (!map.anchors[name]) {
-      const hint = closestKey(name, anchorKeys);
-      issues.push({
-        stepIndex: stepIdx,
-        field,
-        message: `نقطة غير معروفة "${name}"${hint ? ` — هل تقصد "${hint}"؟` : ''}`
-      });
+  const checkPointRef = (stepIdx: number, field: string, ref: PointRef | undefined) => {
+    if (!ref) {
+      issues.push({ stepIndex: stepIdx, field, message: 'الموضع مفقود' });
+      return;
+    }
+    if (typeof ref === 'string') {
+      if (!map.anchors[ref]) {
+        const hint = closestKey(ref, anchorKeys);
+        issues.push({
+          stepIndex: stepIdx,
+          field,
+          message: `نقطة غير معروفة "${ref}"${hint ? ` — هل تقصد "${hint}"؟` : ''}`
+        });
+      }
+    } else if (typeof ref.x !== 'number' || typeof ref.y !== 'number' || !Number.isFinite(ref.x) || !Number.isFinite(ref.y)) {
+      issues.push({ stepIndex: stepIdx, field, message: 'الإحداثيات {x, y} غير صالحة' });
     }
   };
 
@@ -61,20 +69,20 @@ export function validateScenario(
     if (!step.at && !step.after) {
       issues.push({ stepIndex: idx, field: 'at/after', message: 'كل خطوة تحتاج توقيت at أو محفز after' });
     }
-    if (step.camera) checkAnchor(idx, 'camera.focus', step.camera.focus);
+    if (step.camera) checkPointRef(idx, 'camera.focus', step.camera.focus);
     if (step.spawn) {
       for (const s of step.spawn) {
         spawnedIds.add(s.id);
         checkActor(idx, 'spawn.actor', s.actor);
-        checkAnchor(idx, 'spawn.at', s.at);
+        checkPointRef(idx, 'spawn.at', s.at);
       }
     }
-    if (step.pulse) checkAnchor(idx, 'pulse.at', step.pulse.at);
+    if (step.pulse) checkPointRef(idx, 'pulse.at', step.pulse.at);
     if (step.move) {
       if (!spawnedIds.has(step.move.entity)) {
         issues.push({ stepIndex: idx, field: 'move.entity', message: `الوحدة "${step.move.entity}" لم تُنشأ قبل هذا الأمر` });
       }
-      checkAnchor(idx, 'move.to', step.move.to);
+      checkPointRef(idx, 'move.to', step.move.to);
     }
     if (step.remove && !spawnedIds.has(step.remove.entity)) {
       issues.push({ stepIndex: idx, field: 'remove.entity', message: `الوحدة "${step.remove.entity}" غير موجودة للإزالة` });
@@ -82,11 +90,11 @@ export function validateScenario(
     if (step.construct) {
       if (step.construct.id) spawnedIds.add(step.construct.id);
       checkActor(idx, 'construct.actor', step.construct.actor);
-      checkAnchor(idx, 'construct.at', step.construct.at);
+      checkPointRef(idx, 'construct.at', step.construct.at);
     }
     if (step.draw_arrow) {
-      checkAnchor(idx, 'draw_arrow.from', step.draw_arrow.from);
-      checkAnchor(idx, 'draw_arrow.to', step.draw_arrow.to);
+      checkPointRef(idx, 'draw_arrow.from', step.draw_arrow.from);
+      checkPointRef(idx, 'draw_arrow.to', step.draw_arrow.to);
     }
     if (step.zone && !map.zones[step.zone.id]) {
       const hint = closestKey(step.zone.id, zoneKeys);

@@ -7,12 +7,21 @@ import {
   EntityState,
   MapPack,
   Order,
+  Point,
+  PointRef,
   PulseState,
   ScenarioFile,
   ScenarioStep,
   SoundId,
   ZoneVisualState
 } from './types';
+
+function resolvePoint(map: MapPack, ref: PointRef | undefined): Point | undefined {
+  if (!ref) return undefined;
+  if (typeof ref === 'string') return map.anchors[ref];
+  if (typeof ref.x === 'number' && typeof ref.y === 'number') return ref;
+  return undefined;
+}
 
 export const TICK_RATE = 30;
 export const DT = 1 / TICK_RATE;
@@ -229,7 +238,7 @@ export class StudioEngine {
     if (st.sound) this.emitSound(st.sound);
 
     if (st.camera) {
-      const anchor = this.map.anchors[st.camera.focus];
+      const anchor = resolvePoint(this.map, st.camera.focus);
       if (anchor) {
         this.cameraTarget = {
           x: anchor.x,
@@ -243,13 +252,13 @@ export class StudioEngine {
 
     if (st.spawn) {
       for (const s of st.spawn) {
-        const pt = this.map.anchors[s.at];
+        const pt = resolvePoint(this.map, s.at);
         if (pt) this.dispatchOrder({ type: 'spawn', id: s.id, actorId: s.actor, at: pt, faction: s.faction ?? 'blue' });
       }
     }
 
     if (st.move) {
-      const pt = this.map.anchors[st.move.to];
+      const pt = resolvePoint(this.map, st.move.to);
       if (pt) this.dispatchOrder({ type: 'move', entityId: st.move.entity, to: pt });
     }
 
@@ -258,7 +267,7 @@ export class StudioEngine {
     }
 
     if (st.construct) {
-      const pt = this.map.anchors[st.construct.at];
+      const pt = resolvePoint(this.map, st.construct.at);
       if (pt) {
         this.dispatchOrder({
           type: 'construct',
@@ -272,8 +281,8 @@ export class StudioEngine {
     }
 
     if (st.draw_arrow) {
-      const from = this.map.anchors[st.draw_arrow.from];
-      const to = this.map.anchors[st.draw_arrow.to];
+      const from = resolvePoint(this.map, st.draw_arrow.from);
+      const to = resolvePoint(this.map, st.draw_arrow.to);
       if (from && to) {
         const dur = Math.max(0.1, parseSec(st.draw_arrow.duration, 1.5));
         this.arrows.set(st.draw_arrow.id, {
@@ -310,7 +319,7 @@ export class StudioEngine {
     }
 
     if (st.pulse) {
-      const pt = this.map.anchors[st.pulse.at];
+      const pt = resolvePoint(this.map, st.pulse.at);
       if (pt) {
         this.pulses.push({
           x: pt.x,

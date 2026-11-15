@@ -10,6 +10,8 @@ export interface Point {
   y: number;
 }
 
+export type PointRef = string | Point;
+
 export interface MapZoneDef {
   id: string;
   label: string;
@@ -37,6 +39,7 @@ export interface MapPack {
   rows: number;
   navGrid: NavCell[]; // cols * rows
   svgOrUrl: string;
+  unitScaleMultiplier?: number;
   anchors: Record<string, Point & { label?: string }>;
   zones: Record<string, MapZoneDef>;
   // إضافات الخريطة التفاعلية الحية
@@ -71,22 +74,31 @@ export interface ScenarioStep {
   id?: string;
   at?: string;
   after?: string; // "<entityId>.arrived"
-  camera?: { focus: string; zoom?: number; duration?: string };
+  camera?: { focus: PointRef; zoom?: number; duration?: string };
   caption?: { text: string };
   sound?: SoundId;
-  spawn?: Array<{ id: string; actor: string; at: string; faction?: Faction }>;
-  move?: { entity: string; to: string };
-  construct?: { id?: string; actor: string; at: string; faction?: Faction; duration?: string };
+  spawn?: Array<{ id: string; actor: string; at: PointRef; faction?: Faction }>;
+  move?: { entity: string; to: PointRef };
+  construct?: { id?: string; actor: string; at: PointRef; faction?: Faction; duration?: string };
   remove?: { entity: string };
-  draw_arrow?: { id: string; from: string; to: string; color?: string; dashed?: boolean; duration?: string };
+  draw_arrow?: { id: string; from: PointRef; to: PointRef; color?: string; dashed?: boolean; duration?: string };
   zone?: { id: string; color: string; opacity?: number; duration?: string };
   callout?: { id: string; target: string; text: string; color?: string; duration?: string };
-  pulse?: { at: string; color?: string; radius?: number };
+  pulse?: { at: PointRef; color?: string; radius?: number };
 }
 
 export interface ScenarioFile {
   meta: { title: string; map: string; duration_hint?: string };
   timeline: ScenarioStep[];
+}
+
+export interface SavedScenarioRecord {
+  id: string;
+  title: string;
+  mapId: string;
+  yaml: string;
+  source: 'preset' | 'recorded' | 'code';
+  updatedAt: number;
 }
 
 export interface EntityState {

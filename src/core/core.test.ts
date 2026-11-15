@@ -123,9 +123,9 @@ test('StudioEngine deterministic seekToTick, callouts, pulses, and remove work a
   assert.ok(engine.callouts.has('c_temp'));
 });
 
-test('PackRegistry and Catalog/AI Prompt Generator include custom maps and inherited actors', () => {
+test('PackRegistry and Catalog/AI Prompt Generator include custom maps and inherited actors', async () => {
   const reg = new PackRegistry(false);
-  reg.saveCustomActor({
+  await reg.saveCustomActor({
     id: 'cargo_truck',
     label: 'شاحنة إمداد',
     extends: '_vehicle',
@@ -211,7 +211,6 @@ test('MinHeap A* blocks land units across sea and emits onMoveBlocked while supp
 test('rewindGeoJsonForD3 converts RFC 7946 CCW province polygons to D3 spherical CW winding', async () => {
   const { geoArea, geoCentroid } = await import('d3-geo');
   const { rewindGeoJsonForD3 } = await import('../maps/worldGeoEngine');
-  // Small CCW square in Saudi Arabia (~44E..46E, 23N..25N) — RFC 7946 winding
   const ccwFc: GeoJSON.FeatureCollection = {
     type: 'FeatureCollection',
     features: [
@@ -239,5 +238,60 @@ test('rewindGeoJsonForD3 converts RFC 7946 CCW province polygons to D3 spherical
   const [lon, lat] = geoCentroid(rewound);
   assert.ok(Math.abs(lon - 45) < 0.5 && Math.abs(lat - 24) < 0.5, `centroid (${lon}, ${lat}) should stay inside box`);
 });
+
+test('ActionRecorder generates valid YAML with free PointRef coordinates that replays in StudioEngine', async () => {
+  const { ActionRecorder } = await import('./actionRecorder');
+  const map = DEMO_MAPS.tactical_valley;
+  const recorder = new ActionRecorder();
+  recorder.start(map.id, { x: 600, y: 400, zoom: 1.0 });
+  recorder.recordSpawn('sb_1', 'heavy_tank', { x: 180, y: 400 }, 'blue');
+  recorder.recordMove('sb_1', { x: 450, y: 230 });
+  recorder.recordConstruct('sb_2', 'radar_outpost', { x: 240, y: 300 }, 'blue', 1.8);
+  recorder.recordZone('east_sector', '#ef4444', 0.38);
+  recorder.recordArrow('arr_1', { x: 180, y: 400 }, { x: 590, y: 390 });
+  recorder.recordPulse({ x: 590, y: 390 });
+  recorder.recordCaption('تجربة مسجلة');
+  recorder.stop();
+
+  const generatedYaml = recorder.toYaml('عرض تجريبي مسجل');
+  const parsed = yaml.load(generatedYaml) as ScenarioFile;
+  assert.deepEqual(validateScenario(parsed, map, DEMO_ACTORS), [], 'recorded YAML should pass validation cleanly');
+
+  const replay = new StudioEngine(map, DEMO_ACTORS, parsed);
+  replay.seekToTick(90);
+  assert.ok(replay.entities.has('sb_1'), 'recorded spawned tank exists during replay');
+  assert.ok(replay.entities.has('sb_2'), 'recorded constructed building exists during replay');
+  assert.ok(replay.arrows.has('arr_1'), 'recorded arrow exists during replay');
+  assert.equal(replay.caption, 'تجربة مسجلة');
+});
+
+test('rehydrateMapPack restores hitTest polygon picking after IndexedDB serialization', async () => {
+  const { rehydrateMapPack } = await import('../storage/studioDb');
+  const baseMap = {
+    ...DEMO_MAPS.tactical_valley,
+    hitTest: undefined,
+    regions: {
+      zone_a: {
+        id: 'zone_a',
+        name: 'Zone A',
+        center: { x: 150, y: 150 },
+        bounds: { minX: 100, minY: 100, maxX: 200, maxY: 200 },
+        polygons: [
+          [
+            { x: 100, y: 100 },
+            { x: 200, y: 100 },
+            { x: 200, y: 200 },
+            { x: 100, y: 200 }
+          ]
+        ]
+      }
+    }
+  };
+  const rehydrated = rehydrateMapPack(baseMap);
+  assert.equal(typeof rehydrated.hitTest, 'function');
+  assert.equal(rehydrated.hitTest?.({ x: 150, y: 150 }), 'zone_a');
+  assert.equal(rehydrated.hitTest?.({ x: 50, y: 50 }), null);
+});
+
 
 

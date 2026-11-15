@@ -140,6 +140,7 @@ function buildStraitMap(): MapPack {
     rows,
     navGrid,
     svgOrUrl,
+    unitScaleMultiplier: 0.72,
     anchors: {
       capital_north: { x: 180, y: 200, label: 'العاصمة' },
       peninsula_center: { x: 560, y: 280, label: 'وسط الجزيرة' },
@@ -227,6 +228,7 @@ function buildValleyMap(): MapPack {
     rows,
     navGrid,
     svgOrUrl,
+    unitScaleMultiplier: 1.0,
     anchors: {
       base_blue: { x: 180, y: 400, label: 'القاعدة الغربية' },
       bridge_mid: { x: 590, y: 390, label: 'الجسر الأوسط' },

@@ -1,33 +1,44 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as yaml from 'js-yaml';
 import { Eye, EyeOff, Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
+import { ActionRecorder } from './core/actionRecorder';
 import { buildAiScenarioPrompt, generateCatalogMarkdown } from './core/catalog';
 import { DT, StudioEngine, TICK_RATE } from './core/engine';
 import { isPointNearWalkable } from './core/pathfinding';
-import { Faction, MapPack, NavCell, PackBundle, Point, ScenarioFile, ValidationIssue } from './core/types';
+import {
+  Faction,
+  MapPack,
+  NavCell,
+  PackBundle,
+  Point,
+  SavedScenarioRecord,
+  ScenarioFile,
+  ValidationIssue
+} from './core/types';
 import { validateScenario } from './core/validator';
 import { buildCountryProvincesMapPack } from './maps/worldGeoEngine';
 import { PackRegistry } from './packs/packRegistry';
 import { SoundSynth } from './renderer/soundSynth';
 import { StudioRenderer } from './renderer/studioRenderer';
+import { studioDb } from './storage/studioDb';
 import { MapEditTool } from './components/PackBuilderPanel';
 import { SpecModal } from './components/SpecModal';
-import { PresetOption, StudioSidebar } from './components/StudioSidebar';
+import { StudioSidebar } from './components/StudioSidebar';
 import straitYaml from './scenarios/strait_crisis.scenario.yaml?raw';
 import valleyYaml from './scenarios/valley_advance.scenario.yaml?raw';
 import worldYaml from './scenarios/world_demo.scenario.yaml?raw';
 
-const SCENARIOS: Record<string, { label: string; yaml: string }> = {
-  world: { label: 'خريطة العالم التفاعلية (دول + محافظات)', yaml: worldYaml },
-  strait: { label: 'أزمة المضيق (خريطة سياسية)', yaml: straitYaml },
-  valley: { label: 'العبور التكتيكي (خريطة ميدان)', yaml: valleyYaml }
-};
-
-const PRESET_OPTIONS: PresetOption[] = [
-  { key: 'world', label: SCENARIOS.world.label },
-  { key: 'strait', label: SCENARIOS.strait.label },
-  { key: 'valley', label: SCENARIOS.valley.label }
+const PRESET_SCENARIOS: SavedScenarioRecord[] = [
+  { id: 'preset_world', title: 'الملاحة العالمية الحقيقية', mapId: 'world_live', yaml: worldYaml, source: 'preset', updatedAt: 3 },
+  { id: 'preset_strait', title: 'أزمة المضيق البحري', mapId: 'geopolitics_strait', yaml: straitYaml, source: 'preset', updatedAt: 2 },
+  { id: 'preset_valley', title: 'عملية عبور الجسر', mapId: 'tactical_valley', yaml: valleyYaml, source: 'preset', updatedAt: 1 }
 ];
+
+const FACTION_HEX: Record<Faction, string> = {
+  blue: '#38bdf8',
+  red: '#ef4444',
+  neutral: '#f59e0b'
+};
 
 function formatSimTime(sec: number): string {
   const mins = Math.floor(sec / 60);
@@ -62,7 +73,7 @@ async function copyTextSafely(text: string): Promise<boolean> {
 export default function App() {
   const registryRef = useRef<PackRegistry | null>(null);
   if (!registryRef.current) {
-    registryRef.current = new PackRegistry();
+    registryRef.current = new PackRegistry(true);
   }
 
   const stageHostRef = useRef<HTMLDivElement>(null);
@@ -70,9 +81,10 @@ export default function App() {
   const engineRef = useRef<StudioEngine | null>(null);
   const soundRef = useRef<SoundSynth | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const actionRecorderRef = useRef<ActionRecorder>(new ActionRecorder());
   const objectUrlRef = useRef<string | null>(null);
 
-  // Refs synced for 60fps loop
+  // Refs synced for 60fps loop and Pixi callbacks
   const playingRef = useRef(true);
   const speedRef = useRef(1);
   const activeToolRef = useRef<string>('select');
@@ -80,17 +92,20 @@ export default function App() {
   const sandboxCounterRef = useRef(1);
   const mapToolRef = useRef<MapEditTool>('anchor');
   const pointNameRef = useRef<string>('');
+  const pendingActionModeRef = useRef<'none' | 'arrow_start' | 'arrow_end' | 'pulse'>('none');
+  const arrowStartPtRef = useRef<Point | null>(null);
 
   const toastTimerRef = useRef<number | null>(null);
 
   const [packVersion, setPackVersion] = useState(0);
   const [activeTab, setActiveTab] = useState<'play' | 'pack'>('play');
-  const [selectedPreset, setSelectedPreset] = useState('world');
-  const [yamlText, setYamlText] = useState(SCENARIOS.world.yaml);
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string>('preset_world');
+  const [yamlText, setYamlText] = useState(worldYaml);
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
   const [muted, setMuted] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [unitScale, setUnitScale] = useState(1.0);
   const [activeTool, setActiveTool] = useState<string>('select');
   const [sandboxFaction, setSandboxFaction] = useState<Faction>('blue');
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
@@ -108,6 +123,12 @@ export default function App() {
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
   const [geoLoadingMsg, setGeoLoadingMsg] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  // Live ActionRecorder UI state
+  const [actionRecording, setActionRecording] = useState(false);
+  const [recStats, setRecStats] = useState({ clockSec: 0, stepCount: 0 });
+  const [pendingSaveMode, setPendingSaveMode] = useState<'recorded' | 'code' | null>(null);
+  const [saveDraftTitle, setSaveDraftTitle] = useState('');
 
   // Pack builder state
   const [newMapId, setNewMapId] = useState('');
@@ -170,6 +191,21 @@ export default function App() {
     }
   }, [activeTab, mapTool]);
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        pendingActionModeRef.current = 'none';
+        arrowStartPtRef.current = null;
+        if (rendererRef.current) {
+          rendererRef.current.selectedEntityId = null;
+        }
+        setSelectedEntityId(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
     if (toastTimerRef.current !== null) {
@@ -182,7 +218,8 @@ export default function App() {
   }, []);
 
   const syncHudFromEngine = useCallback((eng: StudioEngine) => {
-    const maxTicks = Math.max(60, Math.ceil(eng.estimateDurationSec() * TICK_RATE));
+    const hasSteps = (eng.scenario.timeline?.length ?? 0) > 0;
+    const maxTicks = hasSteps ? Math.max(60, Math.ceil(eng.estimateDurationSec() * TICK_RATE)) : 600;
     setHudState({
       simTimeSec: eng.tick * DT,
       tick: eng.tick,
@@ -194,8 +231,58 @@ export default function App() {
     });
   }, []);
 
+  const attachEngineListeners = useCallback(
+    (eng: StudioEngine) => {
+      if (soundRef.current) {
+        eng.onSound((id) => soundRef.current?.play(id));
+      }
+      eng.onMoveBlocked((ent) => {
+        showToast(
+          ent.domain === 'land'
+            ? '⚠️ لا يوجد مسار بري متصل — الدبابات والمشاة لا تعبر البحر!'
+            : '⚠️ لا يوجد مسار بحري متصل — السفن لا تعبر اليابسة!'
+        );
+      });
+    },
+    [showToast]
+  );
+
+  const openEmptyMapBoard = useCallback(
+    async (mapId: string) => {
+      const reg = registryRef.current!;
+      const map = reg.maps[mapId];
+      if (!map) return;
+
+      setIssues([]);
+      setYamlSyntaxError(null);
+      setStatusNotice(null);
+
+      const blankScenario: ScenarioFile = {
+        meta: { title: `لوح حر: ${map.title}`, map: map.id },
+        timeline: []
+      };
+      const engine = new StudioEngine(map, reg.actors, blankScenario);
+      attachEngineListeners(engine);
+      engineRef.current = engine;
+      setActiveMap(map);
+      setSelectedEntityId(null);
+      setHoveredRegionId(null);
+      setSelectedRegionId(null);
+      sandboxCounterRef.current = 1;
+
+      if (rendererRef.current) {
+        await rendererRef.current.loadEngineAssets(engine);
+      }
+
+      syncHudFromEngine(engine);
+      await studioDb.setSetting('lastMapId', map.id);
+      await studioDb.setSetting('lastScenarioId', '');
+    },
+    [attachEngineListeners, syncHudFromEngine]
+  );
+
   const loadScenario = useCallback(
-    async (rawYaml: string, noticeText: string | null = null) => {
+    async (rawYaml: string, noticeText: string | null = null, savedScenarioId?: string): Promise<boolean> => {
       const reg = registryRef.current!;
       setIssues([]);
       setYamlSyntaxError(null);
@@ -207,20 +294,11 @@ export default function App() {
         const foundIssues = validateScenario(parsed, map, reg.actors);
         if (foundIssues.length > 0) {
           setIssues(foundIssues);
-          return;
+          return false;
         }
 
         const engine = new StudioEngine(map, reg.actors, parsed);
-        if (soundRef.current) {
-          engine.onSound((id) => soundRef.current?.play(id));
-        }
-        engine.onMoveBlocked((ent) => {
-          showToast(
-            ent.domain === 'land'
-              ? '⚠️ لا يوجد مسار بري متصل — الدبابات والمشاة لا تعبر البحر!'
-              : '⚠️ لا يوجد مسار بحري متصل — السفن لا تعبر اليابسة!'
-          );
-        });
+        attachEngineListeners(engine);
         engineRef.current = engine;
         setActiveMap(map);
         setSelectedEntityId(null);
@@ -232,48 +310,55 @@ export default function App() {
         }
 
         syncHudFromEngine(engine);
+        await studioDb.setSetting('lastMapId', map.id);
+        if (savedScenarioId !== undefined) {
+          await studioDb.setSetting('lastScenarioId', savedScenarioId);
+        }
         if (noticeText) {
           setStatusNotice(noticeText);
         }
+        return true;
       } catch (err) {
         setYamlSyntaxError((err as Error).message);
+        return false;
       }
     },
-    [showToast, syncHudFromEngine]
+    [attachEngineListeners, syncHudFromEngine]
   );
 
   const enterCountryProvinces = useCallback(
     async (regionId: string) => {
       const eng = engineRef.current;
       const renderer = rendererRef.current;
+      const reg = registryRef.current!;
       const regMap = eng?.map.regions?.[regionId];
       if (!eng || !renderer || !regMap?.iso3) return;
 
       const title = regMap.nameAr ? `${regMap.nameAr} (${regMap.name})` : regMap.name;
-      setGeoLoadingMsg(`⏳ جاري تجهيز محافظات ${title}...`);
+      setGeoLoadingMsg(`⏳ جاري تحميل محافظات ${title}...`);
       renderer.focusRegion(eng, regionId);
 
       try {
-        const countryMap = await buildCountryProvincesMapPack(regMap.iso3, title);
-        registryRef.current!.maps[countryMap.id] = countryMap;
+        const cachedId = `country_${regMap.iso3.toLowerCase()}`;
+        let countryMap = reg.maps[cachedId];
+        if (!countryMap) {
+          countryMap = await buildCountryProvincesMapPack(regMap.iso3, title);
+          await reg.saveCustomMap(countryMap);
+        }
         setPackVersion((v) => v + 1);
-        const firstAnchor = Object.keys(countryMap.anchors)[0];
-        const starterYaml = `meta:\n  title: "${countryMap.title}"\n  map: ${countryMap.id}\ntimeline:\n  - at: 0s\n    caption: { text: "خريطة ${title} جاهزة — اختر وحدة وحرّكها بين المحافظات أو انسخ Prompt للـ AI" }${
-          firstAnchor ? `\n    pulse: { at: ${firstAnchor}, color: "#38bdf8", radius: 65 }` : ''
-        }\n`;
-        setYamlText(starterYaml);
         setPlaying(true);
-        await loadScenario(starterYaml, null);
+        await openEmptyMapBoard(countryMap.id);
+        setStatusNotice(`خريطة محافظات ${title} جاهزة — حرّك وحداتك أو ابدأ تسجيل سيناريو الآن`);
       } catch (err) {
         showToast((err as Error).message);
       } finally {
         setGeoLoadingMsg(null);
       }
     },
-    [loadScenario, showToast]
+    [openEmptyMapBoard, showToast]
   );
 
-  // Initialize PixiJS StudioRenderer + 30 TPS loop once
+  // Initialize PackRegistry (IndexedDB), PixiJS StudioRenderer, & 30 TPS loop once
   useEffect(() => {
     const host = stageHostRef.current;
     if (!host) return;
@@ -321,6 +406,7 @@ export default function App() {
     renderer.onMapClick = (pt: Point, hitId: string | null) => {
       const eng = engineRef.current;
       const reg = registryRef.current;
+      const rec = actionRecorderRef.current;
       if (!eng || !reg) return;
 
       if (renderer.editorOverlay.enabled) {
@@ -341,6 +427,36 @@ export default function App() {
         return;
       }
 
+      // أوضاع الرسم السريع أثناء تسجيل السيناريو
+      if (pendingActionModeRef.current === 'arrow_start') {
+        arrowStartPtRef.current = pt;
+        pendingActionModeRef.current = 'arrow_end';
+        showToast('الآن اضغط نقطة نهاية السهم على الخريطة');
+        return;
+      }
+      if (pendingActionModeRef.current === 'arrow_end' && arrowStartPtRef.current) {
+        const id = `arr_${Date.now()}`;
+        eng.arrows.set(id, {
+          id,
+          from: arrowStartPtRef.current,
+          to: pt,
+          color: '#f59e0b',
+          dashed: true,
+          progress: 0,
+          rate: 0.8
+        });
+        rec.recordArrow(id, arrowStartPtRef.current, pt, '#f59e0b', true);
+        pendingActionModeRef.current = 'none';
+        arrowStartPtRef.current = null;
+        return;
+      }
+      if (pendingActionModeRef.current === 'pulse') {
+        eng.pulses.push({ x: pt.x, y: pt.y, color: '#ef4444', maxRadius: 70, progress: 0 });
+        rec.recordPulse(pt, '#ef4444');
+        pendingActionModeRef.current = 'none';
+        return;
+      }
+
       const tool = activeToolRef.current;
       if (tool === 'select') {
         if (hitId) {
@@ -349,6 +465,7 @@ export default function App() {
         } else if (renderer.selectedEntityId) {
           eng.dispatchOrder({ type: 'move', entityId: renderer.selectedEntityId, to: pt });
           eng.flushOrders();
+          rec.recordMove(renderer.selectedEntityId, pt);
           syncHudFromEngine(eng);
         } else {
           const regionHit = eng.map.hitTest?.(pt) ?? null;
@@ -370,8 +487,10 @@ export default function App() {
         const faction = sandboxFactionRef.current;
         if (actor.kind === 'building') {
           eng.dispatchOrder({ type: 'construct', id, actorId: actor.id, at: pt, faction, durationSec: 1.8 });
+          rec.recordConstruct(id, actIdFallback(actor.id), pt, faction, 1.8);
         } else {
           eng.dispatchOrder({ type: 'spawn', id, actorId: actor.id, at: pt, faction });
+          rec.recordSpawn(id, actor.id, pt, faction);
           renderer.selectedEntityId = id;
           setSelectedEntityId(id);
           setActiveTool('select');
@@ -381,10 +500,42 @@ export default function App() {
       }
     };
 
+    const actIdFallback = (id: string) => id;
+
     const boot = async () => {
+      const reg = registryRef.current!;
+      await reg.init(PRESET_SCENARIOS);
       await renderer.init(host);
       if (cancelled) return;
-      await loadScenario(SCENARIOS.world.yaml, null);
+
+      const savedScale = await studioDb.getSetting<number>('unitScale');
+      if (savedScale && Number.isFinite(savedScale)) {
+        renderer.userUnitScale = savedScale;
+        setUnitScale(savedScale);
+      }
+
+      const lastScenId = await studioDb.getSetting<string>('lastScenarioId');
+      const lastMapId = await studioDb.getSetting<string>('lastMapId');
+      setPackVersion((v) => v + 1);
+
+      const initialScen =
+        lastScenId !== undefined
+          ? lastScenId
+            ? reg.scenarios.find((s) => s.id === lastScenId)
+            : undefined
+          : reg.scenarios[0];
+
+      if (initialScen) {
+        setSelectedScenarioId(initialScen.id);
+        setYamlText(initialScen.yaml);
+        await loadScenario(initialScen.yaml, null, initialScen.id);
+      } else if (lastMapId && reg.maps[lastMapId]) {
+        await openEmptyMapBoard(lastMapId);
+      } else {
+        setSelectedScenarioId('preset_world');
+        setYamlText(worldYaml);
+        await loadScenario(worldYaml, null, 'preset_world');
+      }
 
       let accumulator = 0;
       let lastTime = performance.now();
@@ -392,6 +543,8 @@ export default function App() {
       let lastHudCaption = '';
       let lastHudEntities = -1;
       let lastHudSteps = -1;
+      let lastRecTenths = -1;
+      let lastRecCount = -1;
 
       const loop = (now: number) => {
         if (cancelled) return;
@@ -404,6 +557,17 @@ export default function App() {
           while (accumulator >= DT) {
             eng.step();
             accumulator -= DT;
+          }
+        }
+
+        const rec = actionRecorderRef.current;
+        if (rec.isRecording) {
+          const recSec = rec.elapsedSec();
+          const recTenths = Math.floor(recSec * 10);
+          if (recTenths !== lastRecTenths || rec.steps.length !== lastRecCount) {
+            lastRecTenths = recTenths;
+            lastRecCount = rec.steps.length;
+            setRecStats({ clockSec: recSec, stepCount: rec.steps.length });
           }
         }
 
@@ -426,7 +590,8 @@ export default function App() {
             lastHudCaption = eng.caption;
             lastHudEntities = entCount;
             lastHudSteps = execSteps;
-            const maxTicks = Math.max(60, Math.ceil(eng.estimateDurationSec() * TICK_RATE));
+            const hasSteps = (eng.scenario.timeline?.length ?? 0) > 0;
+            const maxTicks = hasSteps ? Math.max(60, Math.ceil(eng.estimateDurationSec() * TICK_RATE)) : 600;
             setHudState({
               simTimeSec: simSec,
               tick: eng.tick,
@@ -445,7 +610,7 @@ export default function App() {
       rafId = requestAnimationFrame(loop);
     };
 
-    boot();
+    void boot();
 
     return () => {
       cancelled = true;
@@ -461,14 +626,157 @@ export default function App() {
       }
       renderer.destroy();
     };
-  }, [enterCountryProvinces, loadScenario, showToast, syncHudFromEngine]);
+  }, [enterCountryProvinces, loadScenario, openEmptyMapBoard, showToast, syncHudFromEngine]);
 
-  const handleSelectPreset = async (key: string) => {
-    setSelectedPreset(key);
-    const nextYaml = SCENARIOS[key].yaml;
-    setYamlText(nextYaml);
+  const handleChangeUnitScale = async (nextScale: number) => {
+    setUnitScale(nextScale);
+    if (rendererRef.current) {
+      rendererRef.current.userUnitScale = nextScale;
+    }
+    await studioDb.setSetting('unitScale', nextScale);
+  };
+
+  // Live ActionRecorder handlers
+  const handleStartActionRecord = async () => {
+    const eng = engineRef.current;
+    const renderer = rendererRef.current;
+    if (!eng || !renderer) return;
+    await openEmptyMapBoard(eng.map.id);
     setPlaying(true);
-    await loadScenario(nextYaml, null);
+    actionRecorderRef.current.start(eng.map.id, renderer.getCameraState());
+    setPendingSaveMode(null);
+    setActionRecording(true);
+    setRecStats({ clockSec: 0, stepCount: actionRecorderRef.current.steps.length });
+  };
+
+  const handleRequestStopActionRecord = () => {
+    actionRecorderRef.current.stop();
+    setActionRecording(false);
+    pendingActionModeRef.current = 'none';
+    setSaveDraftTitle(`سيناريو مسجّل (${activeMap.title})`);
+    setPendingSaveMode('recorded');
+  };
+
+  const handleRequestSaveYaml = async () => {
+    const ok = await loadScenario(yamlText);
+    if (!ok) return;
+    const parsed = yaml.load(yamlText) as ScenarioFile;
+    setSaveDraftTitle(parsed?.meta?.title || `سيناريو (${activeMap.title})`);
+    setPendingSaveMode('code');
+  };
+
+  const handleConfirmSaveScenario = async () => {
+    const reg = registryRef.current!;
+    const title = saveDraftTitle.trim() || `سيناريو (${activeMap.title})`;
+    if (pendingSaveMode === 'recorded') {
+      const generatedYaml = actionRecorderRef.current.toYaml(title);
+      setYamlText(generatedYaml);
+      const rec: SavedScenarioRecord = {
+        id: `rec_${Date.now()}`,
+        title,
+        mapId: actionRecorderRef.current.mapId || activeMap.id,
+        yaml: generatedYaml,
+        source: 'recorded',
+        updatedAt: Date.now()
+      };
+      await reg.saveScenarioRecord(rec);
+      setSelectedScenarioId(rec.id);
+      setPackVersion((v) => v + 1);
+      setPendingSaveMode(null);
+      setPlaying(true);
+      await loadScenario(
+        generatedYaml,
+        `تم حفظ "${title}" (${actionRecorderRef.current.steps.length} خطوة) في قاعدة البيانات`,
+        rec.id
+      );
+    } else if (pendingSaveMode === 'code') {
+      const parsed = yaml.load(yamlText) as ScenarioFile;
+      const rec: SavedScenarioRecord = {
+        id: `scen_${Date.now()}`,
+        title,
+        mapId: parsed.meta.map,
+        yaml: yamlText,
+        source: 'code',
+        updatedAt: Date.now()
+      };
+      await reg.saveScenarioRecord(rec);
+      setSelectedScenarioId(rec.id);
+      setPackVersion((v) => v + 1);
+      setPendingSaveMode(null);
+      await studioDb.setSetting('lastScenarioId', rec.id);
+      setStatusNotice(`تم حفظ "${title}" في قاعدة البيانات!`);
+    }
+  };
+
+  const handleLoadSelectedScenario = async () => {
+    const rec = registryRef.current!.scenarios.find((s) => s.id === selectedScenarioId);
+    if (!rec) return;
+    setYamlText(rec.yaml);
+    setPlaying(true);
+    await loadScenario(rec.yaml, `تم تشغيل "${rec.title}"`, rec.id);
+  };
+
+  const handleDeleteSelectedScenario = async () => {
+    if (!selectedScenarioId) return;
+    const reg = registryRef.current!;
+    await reg.deleteScenarioRecord(selectedScenarioId);
+    setPackVersion((v) => v + 1);
+    const nextId = reg.scenarios[0]?.id ?? '';
+    setSelectedScenarioId(nextId);
+    setStatusNotice('تم حذف السيناريو من السجل');
+  };
+
+  const handleRecCamera = () => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    const c = renderer.getCameraState();
+    actionRecorderRef.current.recordCamera(c.x, c.y, c.zoom);
+    showToast('📷 تم تسجيل لقطة الكاميرا الحالية');
+  };
+
+  const handleRecCaptionSubmit = (text: string) => {
+    if (!engineRef.current) return;
+    engineRef.current.caption = text;
+    actionRecorderRef.current.recordCaption(text);
+    syncHudFromEngine(engineRef.current);
+  };
+
+  const handleRecZone = () => {
+    const eng = engineRef.current;
+    const regId = rendererRef.current?.selectedRegionId;
+    if (!eng || !regId || !eng.zones.has(regId)) {
+      showToast('حدد دولة أو محافظة أولًا (في وضع التحديد) ثم اضغط تلوين');
+      return;
+    }
+    const z = eng.zones.get(regId)!;
+    const col = FACTION_HEX[sandboxFactionRef.current];
+    z.color = col;
+    z.targetOpacity = 0.38;
+    z.opacity = 0.38;
+    actionRecorderRef.current.recordZone(z.id, col, 0.38);
+  };
+
+  const handleRecArrow = () => {
+    pendingActionModeRef.current = 'arrow_start';
+    showToast('اضغط نقطة بداية السهم ثم نقطة نهايته على الخريطة');
+  };
+
+  const handleRecPulse = () => {
+    pendingActionModeRef.current = 'pulse';
+    showToast('اضغط على الخريطة لوضع موجة تنبيه');
+  };
+
+  const handleRecDeleteUnit = () => {
+    const eng = engineRef.current;
+    const renderer = rendererRef.current;
+    if (!eng || !renderer?.selectedEntityId) return;
+    const id = renderer.selectedEntityId;
+    eng.dispatchOrder({ type: 'remove', entityId: id });
+    eng.flushOrders();
+    actionRecorderRef.current.recordRemove(id);
+    renderer.selectedEntityId = null;
+    setSelectedEntityId(null);
+    syncHudFromEngine(eng);
   };
 
   const handleRestart = () => {
@@ -526,7 +834,7 @@ export default function App() {
       const text = await file.text();
       const bundle = yaml.load(text) as PackBundle;
       const reg = registryRef.current!;
-      const res = reg.importBundle(bundle);
+      const res = await reg.importBundle(bundle);
       if (engineRef.current && rendererRef.current) {
         engineRef.current.actors = reg.actors;
         await rendererRef.current.syncActorTextures(reg.actors);
@@ -555,23 +863,13 @@ export default function App() {
   };
 
   // Pack builder handlers
-  const handleSelectActiveMap = async (mapId: string) => {
-    const reg = registryRef.current!;
-    const map = reg.maps[mapId];
-    if (!map) return;
-    const blankEngine = new StudioEngine(map, reg.actors, {
-      meta: { title: map.title, map: map.id },
-      timeline: []
-    });
-    engineRef.current = blankEngine;
-    setActiveMap(map);
+  const handleSelectActiveMapForBuilder = async (mapId: string) => {
+    await openEmptyMapBoard(mapId);
     if (rendererRef.current) {
       rendererRef.current.editorOverlay.draftZonePoints = [];
       setDraftZoneCount(0);
-      await rendererRef.current.loadEngineAssets(blankEngine);
     }
-    syncHudFromEngine(blankEngine);
-    setPackNotice({ kind: 'ok', text: `تم فتح الخريطة "${map.id}" للتحرير` });
+    setPackNotice({ kind: 'ok', text: `تم فتح الخريطة "${mapId}" للتحرير` });
   };
 
   const handleUploadNewMapImage = (file: File) => {
@@ -594,24 +892,18 @@ export default function App() {
         rows,
         navGrid: new Array(cols * rows).fill(0),
         svgOrUrl: dataUrl,
+        unitScaleMultiplier: 0.85,
         anchors: {},
         zones: {}
       };
-      reg.saveCustomMap(newMap);
+      await reg.saveCustomMap(newMap);
       setPackVersion((v) => v + 1);
-      const blankEngine = new StudioEngine(newMap, reg.actors, {
-        meta: { title: newId, map: newId },
-        timeline: []
-      });
-      engineRef.current = blankEngine;
-      setActiveMap(newMap);
+      await openEmptyMapBoard(newId);
       if (rendererRef.current) {
         rendererRef.current.editorOverlay.draftZonePoints = [];
         setDraftZoneCount(0);
-        await rendererRef.current.loadEngineAssets(blankEngine);
       }
-      syncHudFromEngine(blankEngine);
-      setPackNotice({ kind: 'ok', text: `تم تحميل الخريطة "${newId}" — أضف المراسي الآن بالنقر عليها` });
+      setPackNotice({ kind: 'ok', text: `تم تحميل وحفظ الخريطة "${newId}" في قاعدة البيانات` });
     };
     reader.readAsDataURL(file);
   };
@@ -640,18 +932,18 @@ export default function App() {
     setDraftZoneCount(0);
   };
 
-  const handleSaveCurrentMap = () => {
+  const handleSaveCurrentMap = async () => {
     const eng = engineRef.current;
     if (!eng) return;
-    registryRef.current!.saveCustomMap(eng.map);
+    await registryRef.current!.saveCustomMap(eng.map);
     setPackVersion((v) => v + 1);
-    setPackNotice({ kind: 'ok', text: `تم حفظ الخريطة "${eng.map.id}" في ذاكرة الاستوديو` });
+    setPackNotice({ kind: 'ok', text: `تم حفظ الخريطة "${eng.map.id}" في قاعدة البيانات` });
   };
 
   const handleCreateStarterScenario = async () => {
     const eng = engineRef.current;
     if (!eng) return;
-    registryRef.current!.saveCustomMap(eng.map);
+    await registryRef.current!.saveCustomMap(eng.map);
     const anchorKeys = Object.keys(eng.map.anchors);
     const firstAnchor = anchorKeys[0];
     const secondAnchor = anchorKeys[1] ?? anchorKeys[0];
@@ -695,7 +987,7 @@ export default function App() {
       return;
     }
     const reg = registryRef.current!;
-    reg.saveCustomActor({ id, label, extends: newActorTpl, svg: pendingActorDataUrl });
+    await reg.saveCustomActor({ id, label, extends: newActorTpl, svg: pendingActorDataUrl });
     if (engineRef.current && rendererRef.current) {
       engineRef.current.actors = reg.actors;
       await rendererRef.current.syncActorTextures(reg.actors);
@@ -704,7 +996,7 @@ export default function App() {
     setPendingActorDataUrl('');
     setNewActorId('');
     setNewActorLabel('');
-    setPackNotice({ kind: 'ok', text: `تمت إضافة الكيان "${id}" (موروث من ${newActorTpl})` });
+    setPackNotice({ kind: 'ok', text: `تم حفظ الكيان "${id}" في قاعدة البيانات` });
   };
 
   const handleExportPack = () => {
@@ -727,9 +1019,9 @@ export default function App() {
 
   const handleCopyAiPrompt = async () => {
     const reg = registryRef.current!;
-    const topic = aiTopic.trim() || 'اشرح تحرك قافلة وتأمين نقطة عبور استراتيجية';
+    const topic = aiTopic.trim() || `سيناريو على خريطة ${activeMap.title}`;
     const ok = await copyTextSafely(buildAiScenarioPrompt(reg.maps, reg.actors, topic));
-    setStatusNotice(ok ? 'تم نسخ البرومبت + الفهرس بالكامل!' : 'تعذّر الوصول للحافظة');
+    setStatusNotice(ok ? 'تم نسخ البرومبت + الفهرس بالكامل للخرائط والمحافظات!' : 'تعذّر الوصول للحافظة');
   };
 
   // Audio + Video WebM recording
@@ -781,7 +1073,6 @@ export default function App() {
   };
 
   const reg = registryRef.current!;
-  // Reference packVersion to ensure sidebar re-reads updated maps & actors
   void packVersion;
 
   const activeRegionObj = hoveredRegionId ? activeMap.regions?.[hoveredRegionId] : undefined;
@@ -802,15 +1093,40 @@ export default function App() {
       data-playing={String(playing)}
       data-tick={hudState.tick}
       data-entities={hudState.entityCount}
-      data-scenario={selectedPreset}
-      className="flex flex-col lg:grid lg:grid-cols-[390px_1fr] h-screen w-screen overflow-hidden bg-[#090f1a] text-slate-100"
+      data-map={activeMap.id}
+      data-recording={String(actionRecording)}
+      className="flex flex-col lg:grid lg:grid-cols-[400px_1fr] h-screen w-screen overflow-hidden bg-[#090f1a] text-slate-100"
     >
       <StudioSidebar
         activeTab={activeTab}
         onChangeTab={setActiveTab}
-        presets={PRESET_OPTIONS}
-        selectedPreset={selectedPreset}
-        onSelectPreset={handleSelectPreset}
+        maps={reg.maps}
+        activeMapId={activeMap.id}
+        onSelectEnvironmentMap={(id) => void openEmptyMapBoard(id)}
+        onClearBoard={() => void openEmptyMapBoard(activeMap.id)}
+        unitScale={unitScale}
+        onChangeUnitScale={(s) => void handleChangeUnitScale(s)}
+        actionRecording={actionRecording}
+        recClockSec={recStats.clockSec}
+        recStepCount={recStats.stepCount}
+        onStartActionRecord={() => void handleStartActionRecord()}
+        onRequestStopActionRecord={handleRequestStopActionRecord}
+        onRecCamera={handleRecCamera}
+        onRecCaptionSubmit={handleRecCaptionSubmit}
+        onRecZone={handleRecZone}
+        onRecArrow={handleRecArrow}
+        onRecPulse={handleRecPulse}
+        onRecDeleteUnit={handleRecDeleteUnit}
+        pendingSaveMode={pendingSaveMode}
+        saveDraftTitle={saveDraftTitle}
+        onChangeSaveDraftTitle={setSaveDraftTitle}
+        onConfirmSaveScenario={() => void handleConfirmSaveScenario()}
+        onCancelSaveScenario={() => setPendingSaveMode(null)}
+        scenarios={reg.scenarios}
+        selectedScenarioId={selectedScenarioId}
+        onSelectScenarioId={setSelectedScenarioId}
+        onLoadSelectedScenario={() => void handleLoadSelectedScenario()}
+        onDeleteSelectedScenario={() => void handleDeleteSelectedScenario()}
         playing={playing}
         onTogglePlay={() => setPlaying((p) => !p)}
         onRestart={handleRestart}
@@ -823,6 +1139,7 @@ export default function App() {
         actors={reg.actors}
         activeTool={activeTool}
         onSelectTool={(tool) => {
+          pendingActionModeRef.current = 'none';
           setActiveTool(tool);
           if (tool === 'select' && rendererRef.current) {
             rendererRef.current.selectedEntityId = null;
@@ -841,16 +1158,15 @@ export default function App() {
           setYamlText(val);
           if (statusNotice) setStatusNotice(null);
         }}
-        onApplyYaml={() => loadScenario(yamlText, 'تم التحقق والتشغيل')}
+        onApplyYaml={() => void loadScenario(yamlText, 'تم التحقق والتشغيل')}
+        onRequestSaveYaml={() => void handleRequestSaveYaml()}
         onUploadYamlFile={handleUploadYamlFile}
         onUploadMapImage={handleUploadMapImage}
         issues={issues}
         yamlSyntaxError={yamlSyntaxError}
         statusNotice={statusNotice}
         onOpenSpec={() => setSpecOpen(true)}
-        maps={reg.maps}
-        activeMapId={activeMap.id}
-        onSelectActiveMap={handleSelectActiveMap}
+        onSelectActiveMapForBuilder={(id) => void handleSelectActiveMapForBuilder(id)}
         newMapId={newMapId}
         onChangeNewMapId={setNewMapId}
         onUploadNewMapImage={handleUploadNewMapImage}
@@ -861,8 +1177,8 @@ export default function App() {
         draftZoneCount={draftZoneCount}
         onFinishZone={handleFinishZone}
         onClearDraftZone={handleClearDraftZone}
-        onSaveCurrentMap={handleSaveCurrentMap}
-        onCreateStarterScenario={handleCreateStarterScenario}
+        onSaveCurrentMap={() => void handleSaveCurrentMap()}
+        onCreateStarterScenario={() => void handleCreateStarterScenario()}
         newActorId={newActorId}
         onChangeNewActorId={setNewActorId}
         newActorLabel={newActorLabel}
@@ -871,7 +1187,7 @@ export default function App() {
         onChangeNewActorTpl={setNewActorTpl}
         hasPendingActorImage={Boolean(pendingActorDataUrl)}
         onUploadActorImage={handleUploadActorImage}
-        onSaveCustomActor={handleSaveCustomActor}
+        onSaveCustomActor={() => void handleSaveCustomActor()}
         onExportPack={handleExportPack}
         onImportPackFile={handleImportPackFile}
         packNotice={packNotice}
@@ -980,7 +1296,7 @@ export default function App() {
                   <button
                     type="button"
                     id="backWorldBtn"
-                    onClick={() => void handleSelectPreset('world')}
+                    onClick={() => void openEmptyMapBoard('world_live')}
                     className="px-2.5 py-0.5 font-medium bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-600 rounded whitespace-nowrap shrink-0 transition-colors"
                   >
                     ↩ العودة لخريطة العالم
@@ -990,7 +1306,7 @@ export default function App() {
             )}
           </div>
 
-          {/* Blocked Navigation / Error Toast */}
+          {/* Blocked Navigation / Error / Recorder Toast */}
           {toastMsg && (
             <div
               id="toastBar"
