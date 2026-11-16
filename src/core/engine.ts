@@ -1,14 +1,19 @@
-import { findPath } from './pathfinding';
+import { findPath, isWalkable } from './pathfinding';
 import {
   ActorPack,
   ArrowState,
   CalloutState,
   CameraTarget,
+  CraterDecal,
+  Domain,
   EntityState,
+  ExplosionState,
+  Faction,
   MapPack,
   Order,
   Point,
   PointRef,
+  ProjectileState,
   PulseState,
   ScenarioFile,
   ScenarioStep,
@@ -47,6 +52,9 @@ export class StudioEngine {
   public zones = new Map<string, ZoneVisualState>();
   public callouts = new Map<string, CalloutState>();
   public pulses: PulseState[] = [];
+  public projectiles: ProjectileState[] = [];
+  public explosions: ExplosionState[] = [];
+  public craters: CraterDecal[] = [];
   public caption = '';
   public cameraTarget: CameraTarget | null = null;
 
@@ -89,13 +97,14 @@ export class StudioEngine {
   }
 
   get totalStepCount(): number {
-    return this.scenario.timeline?.length ?? 0;
+    return Array.isArray(this.scenario.timeline) ? this.scenario.timeline.length : 0;
   }
 
   estimateDurationSec(): number {
-    let maxAt = 18;
-    for (const st of this.scenario.timeline ?? []) {
-      if (st.at) maxAt = Math.max(maxAt, parseSec(st.at) + 8);
+    let maxAt = Math.max(18, parseSec(this.scenario.meta?.duration_hint, 18));
+    const steps = Array.isArray(this.scenario.timeline) ? this.scenario.timeline : [];
+    for (const st of steps) {
+      if (st?.at) maxAt = Math.max(maxAt, parseSec(st.at) + 8);
     }
     return maxAt;
   }
@@ -115,6 +124,9 @@ export class StudioEngine {
     this.zones.clear();
     this.callouts.clear();
     this.pulses = [];
+    this.projectiles = [];
+    this.explosions = [];
+    this.craters = [];
     this.executedSteps.clear();
     this.orderQueue = [];
     this.caption = '';
@@ -135,6 +147,65 @@ export class StudioEngine {
     this.processOrders();
   }
 
+  private triggerExplosion(
+    x: number,
+    y: number,
+    maxRadius: number,
+    kind: 'airstrike' | 'missile',
+    color: string,
+    attackerFaction: Faction
+  ): void {
+    this.explosions.push({
+      id: `exp_${++this.autoCounter}`,
+      x,
+      y,
+      maxRadius,
+      progress: 0,
+      color,
+      kind
+    });
+    this.pulses.push({ x, y, color, maxRadius: maxRadius * 1.25, progress: 0 });
+    this.craters.push({
+      x,
+      y,
+      radius: Math.max(8, Math.min(28, maxRadius * 0.34)),
+      life: 7.5,
+      maxLife: 7.5
+    });
+    if (this.craters.length > 60) this.craters.shift();
+    this.emitSound('explosion');
+
+    // تدمير الوحدات أو المنشآت المعادية/المحايدة ضمن نطاق الانفجار
+    const hitIds: string[] = [];
+    for (const ent of this.entities.values()) {
+      if (ent.kind === 'air' && ent.altitude > 0.35) continue;
+      if (ent.faction === attackerFaction) continue;
+      if (Math.hypot(ent.x - x, ent.y - y) <= maxRadius + ent.radius * 0.6) {
+        hitIds.push(ent.id);
+      }
+    }
+    for (const id of hitIds) {
+      this.removeEntityWithCallouts(id);
+    }
+  }
+
+  private removeEntityWithCallouts(entityId: string): void {
+    this.entities.delete(entityId);
+    for (const [cid, c] of this.callouts) {
+      if (c.target === entityId && !this.map.anchors[c.target]) {
+        this.callouts.delete(cid);
+      }
+    }
+  }
+
+  private isWorldPointWalkable(x: number, y: number, domain: Domain): boolean {
+    if (domain === 'air') return true;
+    const gx = Math.floor(x / this.map.cellSize);
+    const gy = Math.floor(y / this.map.cellSize);
+    if (gx < 0 || gy < 0 || gx >= this.map.cols || gy >= this.map.rows) return false;
+    return isWalkable(this.map.navGrid[gy * this.map.cols + gx], domain);
+  }
+
   step(): void {
     this.tick++;
     this.evaluateTimeline();
@@ -144,6 +215,7 @@ export class StudioEngine {
       e.prevX = e.x;
       e.prevY = e.y;
       e.prevAngle = e.angle;
+      e.prevAltitude = e.altitude;
 
       if (e.buildProgress < 1) {
         e.buildProgress = Math.min(1, e.buildProgress + e.buildRate * DT);
@@ -158,30 +230,195 @@ export class StudioEngine {
         const dy = target.y - e.y;
         const dist = Math.hypot(dx, dy);
 
-        if (dist > 0.0001) {
-          const desiredAngle = Math.atan2(dy, dx);
-          const diff = normalizeAngleDiff(desiredAngle, e.angle);
-          const maxTurn = e.turnRate * DT;
-          e.angle += Math.abs(diff) <= maxTurn ? diff : Math.sign(diff) * maxTurn;
+        // تسارع وانسيابية في السرعة
+        const targetSpeed = e.speed;
+        const accel = e.kind === 'air' ? e.speed * 2.4 : e.speed * 3.5;
+        e.currentSpeed = Math.min(targetSpeed, e.currentSpeed + accel * DT);
+
+        // إقلاع الطائرات تدريجيًا عند التحليق
+        if (e.kind === 'air') {
+          const remainDist = Math.hypot(
+            e.path[e.path.length - 1].x - e.x,
+            e.path[e.path.length - 1].y - e.y
+          );
+          const wantAlt = e.pendingStrike ? 1 : remainDist < 48 ? Math.max(0.15, remainDist / 48) : 1;
+          e.altitude += (wantAlt - e.altitude) * Math.min(1, DT * 3.2);
         }
 
-        const moveDist = e.speed * DT;
-        if (dist <= moveDist) {
+        let turnThrottle = 1;
+        if (dist > 0.0001) {
+          const desiredAngle = Math.atan2(dy, dx);
+          if (e.kind === 'person') {
+            // المشاة والمبعوث يبقون بوضعية عمودية سليمة دون انقلاب
+            e.angle = 0;
+            e.bankAngle = 0;
+          } else {
+            const diff = normalizeAngleDiff(desiredAngle, e.angle);
+            const maxTurn = e.turnRate * DT;
+            const stepAngle = Math.abs(diff) <= maxTurn ? diff : Math.sign(diff) * maxTurn;
+            e.angle += stepAngle;
+
+            if (e.kind === 'air') {
+              const desiredBank = Math.max(-0.42, Math.min(0.42, diff * 0.65));
+              e.bankAngle += (desiredBank - e.bankAngle) * Math.min(1, DT * 5);
+              if (Math.abs(diff) > 0.65 && dist < 130) {
+                turnThrottle = Math.max(0.55, Math.cos(Math.min(Math.PI * 0.42, Math.abs(diff) * 0.7)));
+              }
+            } else {
+              // السفن والمدرعات تخفف سرعتها داخل المنعطفات الحادة لتنعطف بقوس حقيقي بدون شقلبة
+              turnThrottle = Math.max(0.28, Math.cos(Math.min(Math.PI * 0.45, Math.abs(diff))));
+            }
+          }
+        }
+
+        const moveDist = e.currentSpeed * turnThrottle * DT;
+        const wpCaptureRadius = e.path.length > 1 ? Math.max(moveDist, e.kind === 'air' ? 24 : 12) : moveDist;
+        if (dist <= wpCaptureRadius) {
           e.x = target.x;
           e.y = target.y;
           e.path.shift();
           if (e.path.length === 0) {
             e.isMoving = false;
+            e.currentSpeed = 0;
             e.arrivedTick = this.tick;
           }
         } else {
-          e.x += (dx / dist) * moveDist;
-          e.y += (dy / dist) * moveDist;
+          // للكيانات المتحركة بالاتجاه الأمامي (طائرات/سفن/مركبات)، نمزج الحركة مع متجه الهدف بدقة لمنع الدوران اللانهائي
+          const ux = dx / dist;
+          const uy = dy / dist;
+          if (e.kind === 'person' || dist < 18) {
+            const nx = e.x + ux * moveDist;
+            const ny = e.y + uy * moveDist;
+            if (
+              e.domain === 'air' ||
+              this.isWorldPointWalkable(nx, ny, e.domain) ||
+              !this.isWorldPointWalkable(e.x, e.y, e.domain)
+            ) {
+              e.x = nx;
+              e.y = ny;
+            }
+          } else {
+            const hx = Math.cos(e.angle);
+            const hy = Math.sin(e.angle);
+            const blend = dist < 55 ? 0.68 : 0.34;
+            const mx = hx * (1 - blend) + ux * blend;
+            const my = hy * (1 - blend) + uy * blend;
+            const mLen = Math.hypot(mx, my) || 1;
+            const candX = e.x + (mx / mLen) * moveDist;
+            const candY = e.y + (my / mLen) * moveDist;
+            if (
+              e.domain === 'air' ||
+              this.isWorldPointWalkable(candX, candY, e.domain) ||
+              !this.isWorldPointWalkable(e.x, e.y, e.domain)
+            ) {
+              e.x = candX;
+              e.y = candY;
+            } else {
+              // منع السفينة أو المركبة من الخروج أثناء الانعطاف فوق اليابسة أو العوائق
+              const directX = e.x + ux * moveDist;
+              const directY = e.y + uy * moveDist;
+              const desired = Math.atan2(dy, dx);
+              e.angle += normalizeAngleDiff(desired, e.angle) * Math.min(1, DT * 7);
+              if (this.isWorldPointWalkable(directX, directY, e.domain)) {
+                e.x = directX;
+                e.y = directY;
+              }
+            }
+          }
+        }
+
+        // إطلاق القذيفة عند وصول الطائرة فوق هدف القصف ثم الالتفاف بقوس واسع والعودة للقاعدة للهبوط
+        if (e.pendingStrike) {
+          const dStrike = Math.hypot(e.pendingStrike.to.x - e.x, e.pendingStrike.to.y - e.y);
+          if (dStrike <= Math.max(28, Math.min(44, e.pendingStrike.radius * 0.5)) || e.path.length === 0) {
+            const st = e.pendingStrike;
+            e.pendingStrike = null;
+            this.projectiles.push({
+              id: `proj_${++this.autoCounter}`,
+              mode: 'bomb',
+              x: e.x,
+              y: e.y,
+              prevX: e.x,
+              prevY: e.y,
+              startX: e.x,
+              startY: e.y,
+              targetX: st.to.x,
+              targetY: st.to.y,
+              altitude: e.altitude,
+              progress: 0,
+              durationSec: 0.42,
+              radius: st.radius,
+              color: st.color,
+              faction: e.faction
+            });
+
+            // نقطة عبور بعد الهدف + قوس التفاف واسع باتجاه القاعدة ثم العودة إلى نقطة الانطلاق
+            const clampX = (vx: number) => Math.max(28, Math.min(this.map.width - 28, vx));
+            const clampY = (vy: number) => Math.max(28, Math.min(this.map.height - 28, vy));
+            const flyPast = {
+              x: clampX(st.to.x + Math.cos(e.angle) * 72),
+              y: clampY(st.to.y + Math.sin(e.angle) * 72)
+            };
+            const perpLx = -Math.sin(e.angle);
+            const perpLy = Math.cos(e.angle);
+            const toHomeX = st.returnTo.x - flyPast.x;
+            const toHomeY = st.returnTo.y - flyPast.y;
+            const side = toHomeX * perpLx + toHomeY * perpLy >= 0 ? 1 : -1;
+            const turnWing = {
+              x: clampX(flyPast.x + perpLx * side * 96 - Math.cos(e.angle) * 28),
+              y: clampY(flyPast.y + perpLy * side * 96 - Math.sin(e.angle) * 28)
+            };
+            e.path = [flyPast, turnWing, { ...st.returnTo }];
+            e.isMoving = true;
+          }
         }
       } else {
         e.isMoving = false;
+        e.currentSpeed = 0;
+        e.bankAngle *= 0.85;
+        // هبوط الطائرة بسلاسة عند القاعدة بعد العودة
+        if (e.kind === 'air' && e.altitude > 0) {
+          e.altitude = Math.max(0, e.altitude - DT * 2.2);
+        }
       }
     }
+
+    // تلاشي آثار وسواد القصف تدريجيًا بعد بقائها لفترة وجيزة
+    for (const c of this.craters) {
+      c.life -= DT;
+    }
+    this.craters = this.craters.filter((c) => c.life > 0);
+
+    // تحديث الصواريخ والقنابل
+    const nextProjectiles: ProjectileState[] = [];
+    for (const p of this.projectiles) {
+      p.prevX = p.x;
+      p.prevY = p.y;
+      p.progress = Math.min(1, p.progress + DT / Math.max(0.15, p.durationSec));
+      p.x = p.startX + (p.targetX - p.startX) * p.progress;
+      p.y = p.startY + (p.targetY - p.startY) * p.progress;
+      p.altitude = p.mode === 'missile' ? Math.sin(p.progress * Math.PI) * 1.65 : (1 - p.progress) * 0.9;
+
+      if (p.progress >= 1) {
+        this.triggerExplosion(
+          p.targetX,
+          p.targetY,
+          p.radius,
+          p.mode === 'missile' ? 'missile' : 'airstrike',
+          p.color,
+          p.faction
+        );
+      } else {
+        nextProjectiles.push(p);
+      }
+    }
+    this.projectiles = nextProjectiles;
+
+    // تحديث الانفجارات التفاعلية
+    for (const ex of this.explosions) {
+      ex.progress += DT * (ex.kind === 'missile' ? 0.95 : 1.15);
+    }
+    this.explosions = this.explosions.filter((ex) => ex.progress < 1);
 
     for (const a of this.arrows.values()) {
       if (a.progress < 1) a.progress = Math.min(1, a.progress + a.rate * DT);
@@ -210,10 +447,10 @@ export class StudioEngine {
 
   private evaluateTimeline(): void {
     const timeSec = this.tick * DT;
-    const steps = this.scenario.timeline ?? [];
+    const steps = Array.isArray(this.scenario.timeline) ? this.scenario.timeline : [];
 
     steps.forEach((st, idx) => {
-      if (this.executedSteps.has(idx)) return;
+      if (!st || this.executedSteps.has(idx)) return;
       let ready = false;
 
       if (st.at !== undefined && timeSec >= parseSec(st.at)) {
@@ -253,13 +490,26 @@ export class StudioEngine {
     if (st.spawn) {
       for (const s of st.spawn) {
         const pt = resolvePoint(this.map, s.at);
-        if (pt) this.dispatchOrder({ type: 'spawn', id: s.id, actorId: s.actor, at: pt, faction: s.faction ?? 'blue' });
+        if (pt) {
+          this.dispatchOrder({
+            type: 'spawn',
+            id: s.id,
+            actorId: s.actor,
+            at: pt,
+            faction: s.faction ?? 'blue',
+            scale: s.scale
+          });
+        }
       }
     }
 
     if (st.move) {
       const pt = resolvePoint(this.map, st.move.to);
       if (pt) this.dispatchOrder({ type: 'move', entityId: st.move.entity, to: pt });
+    }
+
+    if (st.resize) {
+      this.dispatchOrder({ type: 'resize', entityId: st.resize.entity, scale: st.resize.scale });
     }
 
     if (st.remove) {
@@ -275,7 +525,24 @@ export class StudioEngine {
           actorId: st.construct.actor,
           at: pt,
           faction: st.construct.faction ?? 'blue',
-          durationSec: parseSec(st.construct.duration, 2)
+          durationSec: parseSec(st.construct.duration, 2),
+          scale: st.construct.scale
+        });
+      }
+    }
+
+    if (st.strike) {
+      const to = resolvePoint(this.map, st.strike.to);
+      const from = resolvePoint(this.map, st.strike.from);
+      if (to) {
+        this.dispatchOrder({
+          type: 'strike',
+          attackerId: st.strike.attacker,
+          mode: st.strike.mode ?? 'missile',
+          from,
+          to,
+          radius: st.strike.radius,
+          color: st.strike.color
         });
       }
     }
@@ -350,15 +617,23 @@ export class StudioEngine {
           prevY: ord.at.y,
           angle: 0,
           prevAngle: 0,
+          currentSpeed: 0,
+          altitude: 0,
+          prevAltitude: 0,
+          bankAngle: 0,
           path: [],
           speed: act.speed,
           turnRate: act.turnRate,
           scale: act.scale,
+          scaleMul: ord.scale !== undefined ? Math.max(0.25, Math.min(3.5, ord.scale)) : 1,
           radius: act.radius,
           buildProgress: 1,
           buildRate: 1,
           isMoving: false,
-          arrivedTick: null
+          arrivedTick: null,
+          homeX: ord.at.x,
+          homeY: ord.at.y,
+          pendingStrike: null
         });
         this.emitSound('spawn_pop');
       } else if (ord.type === 'construct') {
@@ -376,16 +651,29 @@ export class StudioEngine {
           prevY: ord.at.y,
           angle: 0,
           prevAngle: 0,
+          currentSpeed: 0,
+          altitude: 0,
+          prevAltitude: 0,
+          bankAngle: 0,
           path: [],
           speed: 0,
           turnRate: 0,
           scale: act.scale,
+          scaleMul: ord.scale !== undefined ? Math.max(0.25, Math.min(3.5, ord.scale)) : 1,
           radius: act.radius,
           buildProgress: 0,
           buildRate: 1 / Math.max(0.2, ord.durationSec),
           isMoving: false,
-          arrivedTick: null
+          arrivedTick: null,
+          homeX: ord.at.x,
+          homeY: ord.at.y,
+          pendingStrike: null
         });
+      } else if (ord.type === 'resize') {
+        const ent = this.entities.get(ord.entityId);
+        if (ent && Number.isFinite(ord.scale)) {
+          ent.scaleMul = Math.max(0.25, Math.min(3.5, ord.scale));
+        }
       } else if (ord.type === 'move') {
         const ent = this.entities.get(ord.entityId);
         if (!ent || ent.kind === 'building') continue;
@@ -395,10 +683,66 @@ export class StudioEngine {
           continue;
         }
         ent.arrivedTick = null;
+        ent.pendingStrike = null;
         ent.path = path;
-        this.emitSound('move_order');
+        if (ent.kind === 'air') {
+          ent.homeX = ord.to.x;
+          ent.homeY = ord.to.y;
+          this.emitSound('jet_takeoff');
+        } else if (ent.kind === 'ship') this.emitSound('ship_horn');
+        else this.emitSound('move_order');
+      } else if (ord.type === 'strike') {
+        const radius = ord.radius ?? (ord.mode === 'missile' ? 78 : 62);
+        const color = ord.color ?? (ord.mode === 'missile' ? '#f97316' : '#ef4444');
+        const attacker = ord.attackerId ? this.entities.get(ord.attackerId) : undefined;
+        const faction = ord.faction ?? attacker?.faction ?? 'blue';
+
+        if (ord.mode === 'airstrike' && attacker && attacker.kind === 'air') {
+          if (attacker.altitude < 0.15) {
+            attacker.homeX = attacker.x;
+            attacker.homeY = attacker.y;
+          }
+          attacker.arrivedTick = null;
+          attacker.pendingStrike = {
+            to: { ...ord.to },
+            radius,
+            mode: 'airstrike',
+            color,
+            returnTo: { x: attacker.homeX, y: attacker.homeY }
+          };
+          attacker.path = [{ ...ord.to }];
+          this.emitSound('jet_takeoff');
+        } else {
+          const launchPt =
+            ord.from ??
+            (attacker ? { x: attacker.x, y: attacker.y } : { x: Math.max(30, ord.to.x - 160), y: Math.min(this.map.height - 30, ord.to.y + 110) });
+          if (attacker && Math.hypot(ord.to.x - attacker.x, ord.to.y - attacker.y) > 4) {
+            attacker.angle = Math.atan2(ord.to.y - attacker.y, ord.to.x - attacker.x);
+          }
+          const dist = Math.hypot(ord.to.x - launchPt.x, ord.to.y - launchPt.y);
+          const dur = ord.mode === 'missile' ? Math.max(0.85, Math.min(2.6, dist / 240)) : Math.max(0.45, Math.min(1.2, dist / 320));
+          this.projectiles.push({
+            id: `proj_${++this.autoCounter}`,
+            mode: ord.mode === 'missile' ? 'missile' : 'bomb',
+            x: launchPt.x,
+            y: launchPt.y,
+            prevX: launchPt.x,
+            prevY: launchPt.y,
+            startX: launchPt.x,
+            startY: launchPt.y,
+            targetX: ord.to.x,
+            targetY: ord.to.y,
+            altitude: 0.1,
+            progress: 0,
+            durationSec: dur,
+            radius,
+            color,
+            faction
+          });
+          this.emitSound(ord.mode === 'missile' ? 'missile_launch' : 'jet_takeoff');
+        }
       } else if (ord.type === 'remove') {
-        this.entities.delete(ord.entityId);
+        this.removeEntityWithCallouts(ord.entityId);
       }
     }
   }

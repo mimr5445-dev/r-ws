@@ -40,6 +40,58 @@ export function isPointNearWalkable(map: MapPack, pt: Point, domain: Domain, max
   return findNearestWalkable(map, gx, gy, domain, maxRadius) !== null;
 }
 
+export function hasLineOfSight(map: MapPack, a: Point, b: Point, domain: Domain): boolean {
+  if (domain === 'air') return true;
+  const dist = Math.hypot(b.x - a.x, b.y - a.y);
+  const stepSize = Math.max(2, map.cellSize * 0.25);
+  const steps = Math.ceil(dist / stepSize);
+  const nx = dist > 0.001 ? -(b.y - a.y) / dist : 0;
+  const ny = dist > 0.001 ? (b.x - a.x) / dist : 0;
+  const pad = domain === 'sea' ? Math.max(5, map.cellSize * 0.68) : Math.min(4, map.cellSize * 0.22);
+  const cellAt = (px: number, py: number): NavCell | -1 => {
+    const gx = Math.floor(px / map.cellSize);
+    const gy = Math.floor(py / map.cellSize);
+    if (gx < 0 || gy < 0 || gx >= map.cols || gy >= map.rows) return -1;
+    return map.navGrid[gy * map.cols + gx];
+  };
+  const checkPt = (px: number, py: number) => {
+    const c = cellAt(px, py);
+    return c !== -1 && isWalkable(c, domain);
+  };
+  for (let i = 0; i <= steps; i++) {
+    const t = steps === 0 ? 0 : i / steps;
+    const x = a.x + (b.x - a.x) * t;
+    const y = a.y + (b.y - a.y) * t;
+    const c = cellAt(x, y);
+    if (c === -1 || !isWalkable(c, domain)) return false;
+    // نطبق هامش أمان جانبي حول السفن خارج الممرات الضيقة (cell === 3) لمنع قص زوايا اليابسة
+    if (c !== 3 && i > 0 && i < steps && (!checkPt(x + nx * pad, y + ny * pad) || !checkPt(x - nx * pad, y - ny * pad))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function smoothPath(map: MapPack, from: Point, rawPath: Point[], domain: Domain): Point[] {
+  if (rawPath.length <= 2 || domain === 'air') return rawPath;
+  const out: Point[] = [];
+  let anchor = from;
+  let i = 0;
+  while (i < rawPath.length) {
+    let furthest = i;
+    for (let j = rawPath.length - 1; j > i; j--) {
+      if (hasLineOfSight(map, anchor, rawPath[j], domain)) {
+        furthest = j;
+        break;
+      }
+    }
+    out.push(rawPath[furthest]);
+    anchor = rawPath[furthest];
+    i = furthest + 1;
+  }
+  return out;
+}
+
 class MinHeap {
   private data: number[] = [];
   constructor(private score: Float32Array) {}
@@ -147,7 +199,7 @@ export function findPath(map: MapPack, from: Point, to: Point, domain: Domain): 
       } else {
         pts.push(rawGoalValid ? { ...to } : goalWorld);
       }
-      return pts;
+      return smoothPath(map, from, pts, domain);
     }
 
     closed[curr] = 1;
@@ -159,13 +211,31 @@ export function findPath(map: MapPack, from: Point, to: Point, domain: Domain): 
       const ny = cy + dy;
       if (nx < 0 || ny < 0 || nx >= map.cols || ny >= map.rows) continue;
       const nIdx = idx(nx, ny);
-      if (closed[nIdx] || !isWalkable(map.navGrid[nIdx], domain)) continue;
+      const nCell = map.navGrid[nIdx];
+      if (closed[nIdx] || !isWalkable(nCell, domain)) continue;
       if (dx !== 0 && dy !== 0) {
         if (!isWalkable(map.navGrid[idx(cx + dx, cy)], domain) || !isWalkable(map.navGrid[idx(cx, cy + dy)], domain)) {
           continue;
         }
       }
-      const tentative = gScore[curr] + cost;
+      // إبعاد السفن تدريجيًا عن الشواطئ لتبحر في عمق البحر بعيدًا عن حدود الدول
+      let coastPenalty = 0;
+      if (domain === 'sea' && nCell === 1 && nIdx !== gIdx) {
+        for (let oy = -1; oy <= 1 && coastPenalty === 0; oy++) {
+          for (let ox = -1; ox <= 1; ox++) {
+            const ax = nx + ox;
+            const ay = ny + oy;
+            if (ax >= 0 && ay >= 0 && ax < map.cols && ay < map.rows) {
+              const adj = map.navGrid[idx(ax, ay)];
+              if (adj === 0 || adj === 2) {
+                coastPenalty = 2.6;
+                break;
+              }
+            }
+          }
+        }
+      }
+      const tentative = gScore[curr] + cost + coastPenalty;
       if (tentative < gScore[nIdx]) {
         cameFrom[nIdx] = curr;
         gScore[nIdx] = tentative;

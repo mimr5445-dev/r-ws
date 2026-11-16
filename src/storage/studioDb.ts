@@ -54,8 +54,21 @@ class StudioDatabase {
         if (!db.objectStoreNames.contains('scenarios')) db.createObjectStore('scenarios', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings', { keyPath: 'key' });
       };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
+      req.onsuccess = () => {
+        const db = req.result;
+        db.onversionchange = () => {
+          db.close();
+          this.dbPromise = null;
+        };
+        db.onclose = () => {
+          this.dbPromise = null;
+        };
+        resolve(db);
+      };
+      req.onerror = () => {
+        this.dbPromise = null;
+        reject(req.error);
+      };
     });
     return this.dbPromise;
   }

@@ -24,11 +24,13 @@ import { studioDb } from './storage/studioDb';
 import { MapEditTool } from './components/PackBuilderPanel';
 import { SpecModal } from './components/SpecModal';
 import { StudioSidebar } from './components/StudioSidebar';
+import airSeaYaml from './scenarios/air_sea_strike.scenario.yaml?raw';
 import straitYaml from './scenarios/strait_crisis.scenario.yaml?raw';
 import valleyYaml from './scenarios/valley_advance.scenario.yaml?raw';
 import worldYaml from './scenarios/world_demo.scenario.yaml?raw';
 
 const PRESET_SCENARIOS: SavedScenarioRecord[] = [
+  { id: 'preset_air_sea', title: 'عمليات حاملة الطائرات والقصف الجوي', mapId: 'geopolitics_strait', yaml: airSeaYaml, source: 'preset', updatedAt: 4 },
   { id: 'preset_world', title: 'الملاحة العالمية الحقيقية', mapId: 'world_live', yaml: worldYaml, source: 'preset', updatedAt: 3 },
   { id: 'preset_strait', title: 'أزمة المضيق البحري', mapId: 'geopolitics_strait', yaml: straitYaml, source: 'preset', updatedAt: 2 },
   { id: 'preset_valley', title: 'عملية عبور الجسر', mapId: 'tactical_valley', yaml: valleyYaml, source: 'preset', updatedAt: 1 }
@@ -82,7 +84,6 @@ export default function App() {
   const soundRef = useRef<SoundSynth | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const actionRecorderRef = useRef<ActionRecorder>(new ActionRecorder());
-  const objectUrlRef = useRef<string | null>(null);
 
   // Refs synced for 60fps loop and Pixi callbacks
   const playingRef = useRef(true);
@@ -90,25 +91,31 @@ export default function App() {
   const activeToolRef = useRef<string>('select');
   const sandboxFactionRef = useRef<Faction>('blue');
   const sandboxCounterRef = useRef(1);
+  const toolScalesRef = useRef<Record<string, number>>({});
   const mapToolRef = useRef<MapEditTool>('anchor');
   const pointNameRef = useRef<string>('');
-  const pendingActionModeRef = useRef<'none' | 'arrow_start' | 'arrow_end' | 'pulse'>('none');
+  const pendingActionModeRef = useRef<
+    'none' | 'arrow_start' | 'arrow_end' | 'pulse' | 'strike_air' | 'strike_missile'
+  >('none');
   const arrowStartPtRef = useRef<Point | null>(null);
 
   const toastTimerRef = useRef<number | null>(null);
 
   const [packVersion, setPackVersion] = useState(0);
   const [activeTab, setActiveTab] = useState<'play' | 'pack'>('play');
-  const [selectedScenarioId, setSelectedScenarioId] = useState<string>('preset_world');
-  const [yamlText, setYamlText] = useState(worldYaml);
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string>('preset_air_sea');
+  const [yamlText, setYamlText] = useState(airSeaYaml);
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
   const [muted, setMuted] = useState(false);
   const [recording, setRecording] = useState(false);
   const [unitScale, setUnitScale] = useState(1.0);
   const [activeTool, setActiveTool] = useState<string>('select');
+  const [strikeMode, setStrikeMode] = useState<'none' | 'airstrike' | 'missile'>('none');
   const [sandboxFaction, setSandboxFaction] = useState<Faction>('blue');
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+  const [selectedEntityScale, setSelectedEntityScale] = useState<number>(1.0);
+  const [toolScales, setToolScales] = useState<Record<string, number>>({});
   const [aiTopic, setAiTopic] = useState('');
   const [issues, setIssues] = useState<ValidationIssue[]>([]);
   const [yamlSyntaxError, setYamlSyntaxError] = useState<string | null>(null);
@@ -196,6 +203,7 @@ export default function App() {
       if (e.key === 'Escape') {
         pendingActionModeRef.current = 'none';
         arrowStartPtRef.current = null;
+        setStrikeMode('none');
         if (rendererRef.current) {
           rendererRef.current.selectedEntityId = null;
         }
@@ -247,12 +255,23 @@ export default function App() {
     [showToast]
   );
 
+  const cancelActiveActionRecording = useCallback(() => {
+    if (actionRecorderRef.current.isRecording) {
+      actionRecorderRef.current.stop();
+      setActionRecording(false);
+    }
+    pendingActionModeRef.current = 'none';
+    arrowStartPtRef.current = null;
+    setStrikeMode('none');
+  }, []);
+
   const openEmptyMapBoard = useCallback(
-    async (mapId: string) => {
+    async (mapId: string, preserveRecording = false) => {
       const reg = registryRef.current!;
       const map = reg.maps[mapId];
       if (!map) return;
 
+      if (!preserveRecording) cancelActiveActionRecording();
       setIssues([]);
       setYamlSyntaxError(null);
       setStatusNotice(null);
@@ -278,12 +297,13 @@ export default function App() {
       await studioDb.setSetting('lastMapId', map.id);
       await studioDb.setSetting('lastScenarioId', '');
     },
-    [attachEngineListeners, syncHudFromEngine]
+    [attachEngineListeners, cancelActiveActionRecording, syncHudFromEngine]
   );
 
   const loadScenario = useCallback(
     async (rawYaml: string, noticeText: string | null = null, savedScenarioId?: string): Promise<boolean> => {
       const reg = registryRef.current!;
+      cancelActiveActionRecording();
       setIssues([]);
       setYamlSyntaxError(null);
       setStatusNotice(null);
@@ -323,7 +343,7 @@ export default function App() {
         return false;
       }
     },
-    [attachEngineListeners, syncHudFromEngine]
+    [attachEngineListeners, cancelActiveActionRecording, syncHudFromEngine]
   );
 
   const enterCountryProvinces = useCallback(
@@ -372,7 +392,11 @@ export default function App() {
     const renderer = new StudioRenderer();
     rendererRef.current = renderer;
 
-    renderer.onSelectionChange = (id) => setSelectedEntityId(id);
+    renderer.onSelectionChange = (id) => {
+      setSelectedEntityId(id);
+      const ent = id ? engineRef.current?.entities.get(id) : undefined;
+      setSelectedEntityScale(ent?.scaleMul ?? 1.0);
+    };
     renderer.onRegionHover = (id) => setHoveredRegionId(id);
     renderer.onRegionDoubleClick = (id) => {
       if (engineRef.current?.map.geoLevel === 'world') {
@@ -403,7 +427,7 @@ export default function App() {
       else if (tool === 'paint_block') paintNavCell(pt, 2);
     };
 
-    renderer.onMapClick = (pt: Point, hitId: string | null) => {
+    renderer.onMapClick = (pt: Point, hitId: string | null, shiftKey = false) => {
       const eng = engineRef.current;
       const reg = registryRef.current;
       const rec = actionRecorderRef.current;
@@ -427,7 +451,7 @@ export default function App() {
         return;
       }
 
-      // أوضاع الرسم السريع أثناء تسجيل السيناريو
+      // أوضاع الرسم السريع أو القصف الجوي/الصاروخي
       if (pendingActionModeRef.current === 'arrow_start') {
         arrowStartPtRef.current = pt;
         pendingActionModeRef.current = 'arrow_end';
@@ -456,12 +480,70 @@ export default function App() {
         pendingActionModeRef.current = 'none';
         return;
       }
+      if (
+        pendingActionModeRef.current === 'strike_air' ||
+        pendingActionModeRef.current === 'strike_missile' ||
+        (shiftKey && renderer.selectedEntityId)
+      ) {
+        const selected = renderer.selectedEntityId ? eng.entities.get(renderer.selectedEntityId) : undefined;
+        const mode: 'airstrike' | 'missile' =
+          pendingActionModeRef.current === 'strike_air'
+            ? 'airstrike'
+            : pendingActionModeRef.current === 'strike_missile'
+              ? 'missile'
+              : selected?.kind === 'air'
+                ? 'airstrike'
+                : 'missile';
+        const faction = selected?.faction ?? sandboxFactionRef.current;
+
+        const allEntities = [...eng.entities.values()];
+        const attacker =
+          mode === 'airstrike'
+            ? (selected?.kind === 'air' && !selected.isMoving && !selected.pendingStrike
+                ? selected
+                : allEntities.find((e) => e.kind === 'air' && e.faction === faction && !e.isMoving && !e.pendingStrike) ??
+                  (selected?.kind === 'air' ? selected : undefined) ??
+                  allEntities.find((e) => e.kind === 'air' && e.faction === faction) ??
+                  allEntities.find((e) => e.kind === 'air'))
+            : selected?.actorId === 'ballistic_launcher' ||
+                selected?.actorId === 'destroyer_ship' ||
+                selected?.kind === 'air'
+              ? selected
+              : allEntities.find(
+                  (e) =>
+                    e.faction === faction &&
+                    (e.actorId === 'ballistic_launcher' ||
+                      e.actorId === 'destroyer_ship' ||
+                      e.actorId === 'military_base')
+                );
+
+        const fallbackFrom =
+          mode === 'airstrike' && !attacker
+            ? { x: Math.max(30, pt.x - 190), y: Math.max(30, pt.y - 120) }
+            : !attacker
+              ? { x: Math.max(30, pt.x - 170), y: Math.min(eng.map.height - 30, pt.y + 120) }
+              : undefined;
+
+        eng.dispatchOrder({
+          type: 'strike',
+          attackerId: attacker?.id,
+          mode,
+          from: fallbackFrom,
+          to: pt,
+          faction
+        });
+        eng.flushOrders();
+        rec.recordStrike(mode, pt, attacker?.id, fallbackFrom);
+        syncHudFromEngine(eng);
+        return;
+      }
 
       const tool = activeToolRef.current;
       if (tool === 'select') {
         if (hitId) {
           renderer.selectedEntityId = hitId;
           setSelectedEntityId(hitId);
+          setSelectedEntityScale(eng.entities.get(hitId)?.scaleMul ?? 1.0);
         } else if (renderer.selectedEntityId) {
           eng.dispatchOrder({ type: 'move', entityId: renderer.selectedEntityId, to: pt });
           eng.flushOrders();
@@ -485,14 +567,19 @@ export default function App() {
         }
         const id = `sb_${sandboxCounterRef.current++}`;
         const faction = sandboxFactionRef.current;
+        const spawnScale = toolScalesRef.current[actor.id] ?? 1.0;
         if (actor.kind === 'building') {
-          eng.dispatchOrder({ type: 'construct', id, actorId: actor.id, at: pt, faction, durationSec: 1.8 });
-          rec.recordConstruct(id, actIdFallback(actor.id), pt, faction, 1.8);
-        } else {
-          eng.dispatchOrder({ type: 'spawn', id, actorId: actor.id, at: pt, faction });
-          rec.recordSpawn(id, actor.id, pt, faction);
+          eng.dispatchOrder({ type: 'construct', id, actorId: actor.id, at: pt, faction, durationSec: 1.8, scale: spawnScale });
+          rec.recordConstruct(id, actIdFallback(actor.id), pt, faction, 1.8, spawnScale);
           renderer.selectedEntityId = id;
           setSelectedEntityId(id);
+          setSelectedEntityScale(spawnScale);
+        } else {
+          eng.dispatchOrder({ type: 'spawn', id, actorId: actor.id, at: pt, faction, scale: spawnScale });
+          rec.recordSpawn(id, actor.id, pt, faction, spawnScale);
+          renderer.selectedEntityId = id;
+          setSelectedEntityId(id);
+          setSelectedEntityScale(spawnScale);
           setActiveTool('select');
         }
         eng.flushOrders();
@@ -618,9 +705,6 @@ export default function App() {
       if (recorderRef.current && recorderRef.current.state === 'recording') {
         recorderRef.current.stop();
       }
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-      }
       if (toastTimerRef.current !== null) {
         window.clearTimeout(toastTimerRef.current);
       }
@@ -636,12 +720,29 @@ export default function App() {
     await studioDb.setSetting('unitScale', nextScale);
   };
 
+  const handleChangeSelectedEntityScale = (nextScale: number) => {
+    const eng = engineRef.current;
+    const entityId = rendererRef.current?.selectedEntityId;
+    if (!eng || !entityId) return;
+    const clamped = Number(Math.max(0.3, Math.min(2.8, nextScale)).toFixed(2));
+    setSelectedEntityScale(clamped);
+    eng.dispatchOrder({ type: 'resize', entityId, scale: clamped });
+    eng.flushOrders();
+    actionRecorderRef.current.recordResize(entityId, clamped);
+  };
+
+  const handleChangeToolScale = (toolId: string, nextScale: number) => {
+    const clamped = Number(Math.max(0.3, Math.min(2.8, nextScale)).toFixed(2));
+    toolScalesRef.current = { ...toolScalesRef.current, [toolId]: clamped };
+    setToolScales((prev) => ({ ...prev, [toolId]: clamped }));
+  };
+
   // Live ActionRecorder handlers
   const handleStartActionRecord = async () => {
     const eng = engineRef.current;
     const renderer = rendererRef.current;
     if (!eng || !renderer) return;
-    await openEmptyMapBoard(eng.map.id);
+    await openEmptyMapBoard(eng.map.id, true);
     setPlaying(true);
     actionRecorderRef.current.start(eng.map.id, renderer.getCameraState());
     setPendingSaveMode(null);
@@ -694,7 +795,7 @@ export default function App() {
       const rec: SavedScenarioRecord = {
         id: `scen_${Date.now()}`,
         title,
-        mapId: parsed.meta.map,
+        mapId: parsed?.meta?.map ?? activeMap.id,
         yaml: yamlText,
         source: 'code',
         updatedAt: Date.now()
@@ -718,11 +819,16 @@ export default function App() {
 
   const handleDeleteSelectedScenario = async () => {
     if (!selectedScenarioId) return;
+    const deletedId = selectedScenarioId;
     const reg = registryRef.current!;
-    await reg.deleteScenarioRecord(selectedScenarioId);
+    await reg.deleteScenarioRecord(deletedId);
     setPackVersion((v) => v + 1);
     const nextId = reg.scenarios[0]?.id ?? '';
     setSelectedScenarioId(nextId);
+    const storedLastId = await studioDb.getSetting<string>('lastScenarioId');
+    if (storedLastId === deletedId) {
+      await studioDb.setSetting('lastScenarioId', nextId);
+    }
     setStatusNotice('تم حذف السيناريو من السجل');
   };
 
@@ -797,6 +903,11 @@ export default function App() {
     setPlaying(false);
     eng.seekToTick(targetTick);
     rendererRef.current?.syncCameraImmediate(eng);
+    const selId = rendererRef.current?.selectedEntityId;
+    if (selId) {
+      const selEnt = eng.entities.get(selId);
+      setSelectedEntityScale(selEnt?.scaleMul ?? 1.0);
+    }
     syncHudFromEngine(eng);
   };
 
@@ -818,15 +929,19 @@ export default function App() {
     await loadScenario(text, 'تم استيراد السيناريو وتشغيله');
   };
 
-  const handleUploadMapImage = async (file: File) => {
+  const handleUploadMapImage = (file: File) => {
     const eng = engineRef.current;
     const renderer = rendererRef.current;
     if (!eng || !renderer) return;
-    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-    const url = URL.createObjectURL(file);
-    objectUrlRef.current = url;
-    eng.map.svgOrUrl = url;
-    await renderer.loadEngineAssets(eng);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = reader.result as string;
+      if (!dataUrl || !engineRef.current || !rendererRef.current) return;
+      engineRef.current.map.svgOrUrl = dataUrl;
+      await rendererRef.current.loadEngineAssets(engineRef.current);
+      setStatusNotice('تم تحديث صورة الخريطة الحالية');
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleImportPackFile = async (file: File) => {
@@ -838,6 +953,10 @@ export default function App() {
       if (engineRef.current && rendererRef.current) {
         engineRef.current.actors = reg.actors;
         await rendererRef.current.syncActorTextures(reg.actors);
+        const updatedCurrentMap = bundle.maps?.find((m) => m.id === engineRef.current?.map.id);
+        if (updatedCurrentMap) {
+          await openEmptyMapBoard(updatedCurrentMap.id);
+        }
       }
       setPackVersion((v) => v + 1);
       const msg = `تم استيراد ${res.mapsAdded} خريطة و ${res.actorsAdded} كيان`;
@@ -1140,15 +1259,37 @@ export default function App() {
         activeTool={activeTool}
         onSelectTool={(tool) => {
           pendingActionModeRef.current = 'none';
+          setStrikeMode('none');
           setActiveTool(tool);
           if (tool === 'select' && rendererRef.current) {
             rendererRef.current.selectedEntityId = null;
             setSelectedEntityId(null);
           }
         }}
+        strikeMode={strikeMode}
+        onSelectStrikeMode={(mode) => {
+          const nextMode = strikeMode === mode ? 'none' : mode;
+          setStrikeMode(nextMode);
+          pendingActionModeRef.current =
+            nextMode === 'airstrike' ? 'strike_air' : nextMode === 'missile' ? 'strike_missile' : 'none';
+          if (nextMode !== 'none') {
+            setActiveTool('select');
+          }
+        }}
         sandboxFaction={sandboxFaction}
         onSelectFaction={setSandboxFaction}
         selectedEntityId={selectedEntityId}
+        selectedEntityLabel={
+          selectedEntityId
+            ? reg.actors[engineRef.current?.entities.get(selectedEntityId)?.actorId ?? '']?.label ?? selectedEntityId
+            : null
+        }
+        selectedEntityScale={selectedEntityScale}
+        onChangeSelectedEntityScale={handleChangeSelectedEntityScale}
+        activeToolScale={activeTool !== 'select' ? toolScales[activeTool] ?? 1.0 : 1.0}
+        onChangeActiveToolScale={(s) => {
+          if (activeTool !== 'select') handleChangeToolScale(activeTool, s);
+        }}
         aiTopic={aiTopic}
         onChangeAiTopic={setAiTopic}
         onCopyAiPrompt={handleCopyAiPrompt}
@@ -1203,7 +1344,7 @@ export default function App() {
         onDrop={handleStageDrop}
       >
         <div className="relative flex-1 min-h-0 w-full">
-          <div ref={stageHostRef} className="w-full h-full" />
+          <div ref={stageHostRef} className={`w-full h-full ${strikeMode !== 'none' ? 'cursor-crosshair' : ''}`} />
 
           {/* Unobtrusive Stage Telemetry & Camera Strip + Geo Drill-Down HUD */}
           <div className="pointer-events-none absolute top-3 inset-x-3 flex flex-col gap-2 z-10">

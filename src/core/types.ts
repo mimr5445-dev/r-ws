@@ -1,6 +1,14 @@
 export type Domain = 'land' | 'sea' | 'air';
 export type Faction = 'blue' | 'red' | 'neutral';
-export type SoundId = 'build_complete' | 'alert_ping' | 'move_order' | 'spawn_pop';
+export type SoundId =
+  | 'build_complete'
+  | 'alert_ping'
+  | 'move_order'
+  | 'spawn_pop'
+  | 'jet_takeoff'
+  | 'missile_launch'
+  | 'explosion'
+  | 'ship_horn';
 
 // خلايا شبكة الملاحة: 0 = يابسة، 1 = ماء، 2 = عائق صلب، 3 = قناة / جسر مشترك
 export type NavCell = 0 | 1 | 2 | 3;
@@ -51,7 +59,7 @@ export interface MapPack {
 
 export interface ActorTemplate {
   domain: Domain;
-  kind: 'person' | 'vehicle' | 'ship' | 'building';
+  kind: 'person' | 'vehicle' | 'ship' | 'building' | 'air';
   speed: number; // world units / second
   turnRate: number; // rad / second
   scale: number; // target height in world units
@@ -77,14 +85,23 @@ export interface ScenarioStep {
   camera?: { focus: PointRef; zoom?: number; duration?: string };
   caption?: { text: string };
   sound?: SoundId;
-  spawn?: Array<{ id: string; actor: string; at: PointRef; faction?: Faction }>;
+  spawn?: Array<{ id: string; actor: string; at: PointRef; faction?: Faction; scale?: number }>;
   move?: { entity: string; to: PointRef };
-  construct?: { id?: string; actor: string; at: PointRef; faction?: Faction; duration?: string };
+  construct?: { id?: string; actor: string; at: PointRef; faction?: Faction; duration?: string; scale?: number };
+  resize?: { entity: string; scale: number };
   remove?: { entity: string };
   draw_arrow?: { id: string; from: PointRef; to: PointRef; color?: string; dashed?: boolean; duration?: string };
   zone?: { id: string; color: string; opacity?: number; duration?: string };
   callout?: { id: string; target: string; text: string; color?: string; duration?: string };
   pulse?: { at: PointRef; color?: string; radius?: number };
+  strike?: {
+    attacker?: string;
+    mode: 'airstrike' | 'missile';
+    from?: PointRef;
+    to: PointRef;
+    radius?: number;
+    color?: string;
+  };
 }
 
 export interface ScenarioFile {
@@ -113,15 +130,66 @@ export interface EntityState {
   prevY: number;
   angle: number;
   prevAngle: number;
+  currentSpeed: number;
+  altitude: number; // 0 = على الأرض/المدرج، 1 = التحليق
+  prevAltitude: number;
+  bankAngle: number;
   path: Point[];
   speed: number;
   turnRate: number;
   scale: number;
+  scaleMul: number;
   radius: number;
   buildProgress: number; // 0..1 (1 = مكتمل)
   buildRate: number;
   isMoving: boolean;
   arrivedTick: number | null;
+  homeX: number;
+  homeY: number;
+  pendingStrike: {
+    to: Point;
+    radius: number;
+    mode: 'airstrike' | 'missile';
+    color: string;
+    returnTo: Point;
+  } | null;
+}
+
+export interface ProjectileState {
+  id: string;
+  mode: 'bomb' | 'missile';
+  x: number;
+  y: number;
+  prevX: number;
+  prevY: number;
+  startX: number;
+  startY: number;
+  targetX: number;
+  targetY: number;
+  altitude: number; // ارتفاع القوس الباليستي / السقوط
+  progress: number; // 0..1
+  durationSec: number;
+  radius: number;
+  color: string;
+  faction: Faction;
+}
+
+export interface ExplosionState {
+  id: string;
+  x: number;
+  y: number;
+  maxRadius: number;
+  progress: number; // 0..1
+  color: string;
+  kind: 'airstrike' | 'missile';
+}
+
+export interface CraterDecal {
+  x: number;
+  y: number;
+  radius: number;
+  life: number;
+  maxLife: number;
 }
 
 export interface ArrowState {
@@ -167,10 +235,21 @@ export interface CameraTarget {
 }
 
 export type Order =
-  | { type: 'spawn'; id: string; actorId: string; at: Point; faction: Faction }
+  | { type: 'spawn'; id: string; actorId: string; at: Point; faction: Faction; scale?: number }
   | { type: 'move'; entityId: string; to: Point }
-  | { type: 'construct'; id: string; actorId: string; at: Point; faction: Faction; durationSec: number }
-  | { type: 'remove'; entityId: string };
+  | { type: 'construct'; id: string; actorId: string; at: Point; faction: Faction; durationSec: number; scale?: number }
+  | { type: 'resize'; entityId: string; scale: number }
+  | { type: 'remove'; entityId: string }
+  | {
+      type: 'strike';
+      attackerId?: string;
+      mode: 'airstrike' | 'missile';
+      from?: Point;
+      to: Point;
+      radius?: number;
+      color?: string;
+      faction?: Faction;
+    };
 
 export interface ValidationIssue {
   stepIndex: number;

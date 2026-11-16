@@ -78,11 +78,12 @@ export function SpecModal({ open, onClose, activeMap, maps, actors }: SpecModalP
               className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 text-xs text-cyan-200 overflow-x-auto leading-6"
             >{`camera:     { focus: "<anchor_id>", zoom: 1.35, duration?: "1.2s" }
 caption:    { text: "نص التعليق السفلي" }
-sound:      "build_complete" | "alert_ping" | "move_order" | "spawn_pop"
+sound:      "build_complete" | "alert_ping" | "move_order" | "spawn_pop" | "jet_takeoff" | "missile_launch" | "explosion" | "ship_horn"
 spawn:      [{ id, actor, at: "<anchor_id>", faction?: "blue"|"red"|"neutral" }]
 move:       { entity: "<entity_id>", to: "<anchor_id>" }
 construct:  { id?, actor: "<building_actor>", at: "<anchor_id>", faction?, duration?: "2s" }
 remove:     { entity: "<entity_id>" }
+strike:     { attacker?: "<entity_id>", mode: "airstrike"|"missile", from?: "<anchor_id>", to: "<anchor_id>", radius?: 75, color?: "#ef4444" }
 draw_arrow: { id, from: "<anchor_id>", to: "<anchor_id>", color?: "#hex", dashed?: true, duration?: "1.5s" }
 zone:       { id: "<zone_id>", color: "#hex", opacity?: 0.35, duration?: "1.2s" }
 callout:    { id, target: "<entity_id | anchor_id>", text: string, color?: "#hex", duration?: "5s" }

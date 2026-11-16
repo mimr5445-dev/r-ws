@@ -16,12 +16,18 @@ test('A* sea pathfinding in geopolitics_strait never crosses land cells', () => 
   const to = map.anchors.port_east;
   const path = findPath(map, from, to, 'sea');
 
-  assert.ok(path.length > 3, 'sea path should have multiple waypoints around peninsula');
+  assert.ok(path.length >= 2, 'smoothed sea path should bend cleanly around peninsula');
+  let prev = from;
   for (const pt of path) {
-    const gx = Math.floor(pt.x / map.cellSize);
-    const gy = Math.floor(pt.y / map.cellSize);
-    const cell = map.navGrid[gy * map.cols + gx];
-    assert.equal(isWalkable(cell, 'sea'), true, `waypoint (${pt.x}, ${pt.y}) stepped onto non-sea cell ${cell}`);
+    for (let s = 0; s <= 10; s++) {
+      const x = prev.x + ((pt.x - prev.x) * s) / 10;
+      const y = prev.y + ((pt.y - prev.y) * s) / 10;
+      const gx = Math.floor(x / map.cellSize);
+      const gy = Math.floor(y / map.cellSize);
+      const cell = map.navGrid[gy * map.cols + gx];
+      assert.equal(isWalkable(cell, 'sea'), true, `segment pt (${x}, ${y}) stepped onto non-sea cell ${cell}`);
+    }
+    prev = pt;
   }
 });
 
@@ -31,16 +37,22 @@ test('A* land pathfinding in tactical_valley crosses river via the bridge and av
   const to = map.anchors.hill_east;
   const path = findPath(map, from, to, 'land');
 
-  assert.ok(path.length > 2, 'land path should cross via bridge');
+  assert.ok(path.length >= 2, 'smoothed land path should bend through the bridge');
   let crossedBridge = false;
+  let prev = from;
   for (const pt of path) {
-    const gx = Math.floor(pt.x / map.cellSize);
-    const gy = Math.floor(pt.y / map.cellSize);
-    const cell = map.navGrid[gy * map.cols + gx];
-    assert.equal(cell, 0, `land unit stepped on invalid cell ${cell} at (${pt.x}, ${pt.y})`);
-    if (pt.x >= 540 && pt.x <= 640 && pt.y >= 350 && pt.y <= 430) {
-      crossedBridge = true;
+    for (let s = 0; s <= 12; s++) {
+      const x = prev.x + ((pt.x - prev.x) * s) / 12;
+      const y = prev.y + ((pt.y - prev.y) * s) / 12;
+      const gx = Math.floor(x / map.cellSize);
+      const gy = Math.floor(y / map.cellSize);
+      const cell = map.navGrid[gy * map.cols + gx];
+      assert.equal(cell, 0, `land unit stepped on invalid cell ${cell} at (${x}, ${y})`);
+      if (x >= 540 && x <= 640 && y >= 350 && y <= 430) {
+        crossedBridge = true;
+      }
     }
+    prev = pt;
   }
   assert.equal(crossedBridge, true, 'land unit must cross the river through the bridge');
 });
@@ -291,6 +303,164 @@ test('rehydrateMapPack restores hitTest polygon picking after IndexedDB serializ
   assert.equal(typeof rehydrated.hitTest, 'function');
   assert.equal(rehydrated.hitTest?.({ x: 150, y: 150 }), 'zone_a');
   assert.equal(rehydrated.hitTest?.({ x: 50, y: 50 }), null);
+});
+
+test('validateScenario guards malformed timelines, invalid sound/faction/after, and engine honors duration_hint', () => {
+  const badTimeline = { meta: { title: 'bad', map: 'tactical_valley' }, timeline: 'oops' } as unknown as ScenarioFile;
+  const tlIssues = validateScenario(badTimeline, DEMO_MAPS.tactical_valley, DEMO_ACTORS);
+  assert.equal(tlIssues[0]?.field, 'timeline');
+
+  const nullStep = {
+    meta: { title: 'bad2', map: 'tactical_valley' },
+    timeline: [
+      null,
+      { at: '0s', sound: 'bad_sfx', spawn: [{ id: 'u1', actor: 'heavy_tank', at: 'base_blue', faction: 'green' }] },
+      { after: 'ghost.arrived', caption: { text: 'bad' } }
+    ]
+  } as unknown as ScenarioFile;
+  const issues = validateScenario(nullStep, DEMO_MAPS.tactical_valley, DEMO_ACTORS);
+  assert.ok(issues.some((i) => i.field === 'step'));
+  assert.ok(issues.some((i) => i.field === 'sound'));
+  assert.ok(issues.some((i) => i.field === 'spawn.faction'));
+  assert.ok(issues.some((i) => i.field === 'after'));
+
+  const hinted = new StudioEngine(DEMO_MAPS.tactical_valley, DEMO_ACTORS, {
+    meta: { title: 'hinted', map: 'tactical_valley', duration_hint: '42s' },
+    timeline: [
+      {
+        at: '0s',
+        spawn: [{ id: 'u1', actor: 'heavy_tank', at: 'base_blue', faction: 'blue' }],
+        callout: { id: 'c_perm', target: 'u1', text: 'باقية حتى الحذف' }
+      },
+      { at: '1s', remove: { entity: 'u1' } }
+    ]
+  });
+  assert.equal(hinted.estimateDurationSec(), 42);
+  hinted.seekToTick(40);
+  assert.equal(hinted.callouts.has('c_perm'), false, 'permanent entity callout should be removed with its target entity');
+});
+
+test('Upgrade 6: air_sea_strike validates, smooths paths, keeps person upright, flies aircraft, and detonates strikes', () => {
+  const airSeaRaw = fs.readFileSync('src/scenarios/air_sea_strike.scenario.yaml', 'utf8');
+  const airSeaParsed = yaml.load(airSeaRaw) as ScenarioFile;
+  assert.deepEqual(validateScenario(airSeaParsed, DEMO_MAPS[airSeaParsed.meta.map], DEMO_ACTORS), []);
+
+  // Path smoothing simplifies clear diagonal routes into very few waypoints
+  const valley = DEMO_MAPS.tactical_valley;
+  const smoothLand = findPath(valley, { x: 100, y: 120 }, { x: 460, y: 360 }, 'land');
+  assert.ok(smoothLand.length <= 4, `expected smoothed land path <= 4 pts, got ${smoothLand.length}`);
+
+  // Person stays upright (angle === 0), aircraft takes off (altitude > 0) and lands back (altitude === 0)
+  const sim = new StudioEngine(DEMO_MAPS.geopolitics_strait, DEMO_ACTORS, {
+    meta: { title: 'physics & strike test', map: 'geopolitics_strait' },
+    timeline: [
+      {
+        at: '0s',
+        spawn: [
+          { id: 'dip', actor: 'diplomat_person', at: { x: 120, y: 160 }, faction: 'blue' },
+          { id: 'jet', actor: 'fighter_jet', at: 'capital_north', faction: 'blue' },
+          { id: 'oil', actor: 'oil_facility', at: { x: 560, y: 200 }, faction: 'red' }
+        ]
+      },
+      {
+        at: '0.2s',
+        move: { entity: 'dip', to: { x: 300, y: 260 } },
+        strike: { attacker: 'jet', mode: 'airstrike', to: { x: 560, y: 200 }, radius: 75 }
+      }
+    ]
+  });
+
+  const startAnchor = DEMO_MAPS.geopolitics_strait.anchors.capital_north;
+  const heard: string[] = [];
+  sim.onSound((s) => heard.push(s));
+
+  for (let i = 0; i < 45; i++) sim.step();
+  const dipMid = sim.entities.get('dip');
+  const jetMid = sim.entities.get('jet');
+  assert.equal(dipMid?.angle, 0, 'person angle must remain 0 so figure never flips upside-down');
+  assert.ok((jetMid?.altitude ?? 0) > 0.35, 'fighter jet must climb in altitude during airstrike sortie');
+  assert.ok(heard.includes('jet_takeoff'), 'airstrike should emit jet_takeoff');
+
+  for (let i = 0; i < 240; i++) sim.step();
+  assert.equal(sim.entities.has('oil'), false, 'opposing oil_facility should be destroyed by airstrike');
+  assert.ok(sim.craters.length >= 1, 'explosion should leave temporary crater decal');
+  assert.ok(heard.includes('explosion'), 'impact should emit explosion sound');
+  const jetEnd = sim.entities.get('jet');
+  assert.ok(jetEnd, 'fighter jet must remain alive');
+  const distHome = Math.hypot(jetEnd.x - startAnchor.x, jetEnd.y - startAnchor.y);
+  assert.ok(distHome < 18, `fighter jet must return to takeoff base, got dist=${distHome.toFixed(1)}`);
+  assert.ok((jetEnd.altitude ?? 1) < 0.05, 'fighter jet should descend and land after returning to base');
+
+  // Ballistic missile strike test
+  sim.dispatchOrder({
+    type: 'strike',
+    mode: 'missile',
+    from: { x: 180, y: 200 },
+    to: { x: 700, y: 200 },
+    radius: 80,
+    faction: 'blue'
+  });
+  sim.flushOrders();
+  assert.ok(heard.includes('missile_launch'), 'missile strike should emit missile_launch');
+  assert.equal(sim.projectiles.length, 1);
+  for (let i = 0; i < 90; i++) sim.step();
+  assert.ok(sim.craters.length >= 1, 'missile detonation should leave crater decal');
+
+  // Craters must fade out and disappear automatically after ~7.5s
+  for (let i = 0; i < 250; i++) sim.step();
+  assert.equal(sim.craters.length, 0, 'temporary blast craters must expire and vanish completely');
+});
+
+test('Ships never climb onto land cells during curved turns and entities support individual scaleMul', async () => {
+  const map = DEMO_MAPS.geopolitics_strait;
+  const sim = new StudioEngine(map, DEMO_ACTORS, {
+    meta: { title: 'sea safety & individual resize', map: 'geopolitics_strait' },
+    timeline: [
+      {
+        at: '0s',
+        spawn: [
+          { id: 'carrier', actor: 'aircraft_carrier', at: 'port_south', faction: 'blue', scale: 1.65 },
+          { id: 'tank', actor: 'heavy_tank', at: 'capital_north', faction: 'blue' }
+        ]
+      },
+      {
+        at: '0.1s',
+        move: { entity: 'carrier', to: 'port_east' }
+      },
+      {
+        at: '0.5s',
+        resize: { entity: 'tank', scale: 0.55 }
+      }
+    ]
+  });
+
+  // Assert carrier never steps onto a land cell at any tick around the peninsula turn
+  for (let i = 0; i < 450; i++) {
+    sim.step();
+    const ship = sim.entities.get('carrier');
+    assert.ok(ship);
+    const gx = Math.floor(ship.x / map.cellSize);
+    const gy = Math.floor(ship.y / map.cellSize);
+    const cell = map.navGrid[gy * map.cols + gx];
+    assert.equal(isWalkable(cell, 'sea'), true, `carrier crossed land cell (${gx},${gy})=${cell} at tick ${sim.tick}`);
+  }
+
+  // Assert individual scales remain independent
+  assert.equal(sim.entities.get('carrier')?.scaleMul, 1.65);
+  assert.equal(sim.entities.get('tank')?.scaleMul, 0.55);
+
+  // ActionRecorder round-trip with spawn.scale and resize
+  const { ActionRecorder } = await import('./actionRecorder');
+  const rec = new ActionRecorder();
+  rec.start(map.id, { x: 600, y: 400, zoom: 1 });
+  rec.recordSpawn('c1', 'aircraft_carrier', map.anchors.port_south, 'blue', 1.4);
+  rec.recordResize('c1', 0.75);
+  rec.stop();
+  const parsed = yaml.load(rec.toYaml('resize rec')) as ScenarioFile;
+  assert.deepEqual(validateScenario(parsed, map, DEMO_ACTORS), []);
+  const replay = new StudioEngine(map, DEMO_ACTORS, parsed);
+  replay.seekToTick(30);
+  assert.equal(replay.entities.get('c1')?.scaleMul, 0.75);
 });
 
 

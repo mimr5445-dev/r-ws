@@ -6,16 +6,21 @@ export class ActionRecorder {
   public mapId = '';
   public steps: ScenarioStep[] = [];
   private startPerfMs = 0;
+  private lastSec = 0;
 
   start(mapId: string, initialCamera: { x: number; y: number; zoom: number }): void {
     this.isRecording = true;
     this.mapId = mapId;
+    this.lastSec = 0;
+    const cx = Number.isFinite(initialCamera.x) ? Math.round(initialCamera.x) : 0;
+    const cy = Number.isFinite(initialCamera.y) ? Math.round(initialCamera.y) : 0;
+    const cz = Number.isFinite(initialCamera.zoom) ? Number(initialCamera.zoom.toFixed(2)) : 1;
     this.steps = [
       {
         at: '0.0s',
         camera: {
-          focus: { x: Math.round(initialCamera.x), y: Math.round(initialCamera.y) },
-          zoom: Number(initialCamera.zoom.toFixed(2)),
+          focus: { x: cx, y: cy },
+          zoom: cz,
           duration: '0.8s'
         }
       }
@@ -29,7 +34,9 @@ export class ActionRecorder {
 
   elapsedSec(): number {
     if (!this.isRecording) return 0;
-    return (performance.now() - this.startPerfMs) / 1000;
+    const raw = Math.max(0, (performance.now() - this.startPerfMs) / 1000);
+    if (raw > this.lastSec) this.lastSec = raw;
+    return this.lastSec;
   }
 
   private atLabel(): string {
@@ -37,14 +44,19 @@ export class ActionRecorder {
   }
 
   private roundPt(pt: Point): Point {
-    return { x: Math.round(pt.x), y: Math.round(pt.y) };
+    return {
+      x: Number.isFinite(pt.x) ? Math.round(pt.x) : 0,
+      y: Number.isFinite(pt.y) ? Math.round(pt.y) : 0
+    };
   }
 
-  recordSpawn(id: string, actor: string, pt: Point, faction: Faction = 'blue'): void {
+  recordSpawn(id: string, actor: string, pt: Point, faction: Faction = 'blue', scale?: number): void {
     if (!this.isRecording) return;
+    const item: NonNullable<ScenarioStep['spawn']>[number] = { id, actor, at: this.roundPt(pt), faction };
+    if (scale !== undefined && Math.abs(scale - 1) > 0.01) item.scale = Number(scale.toFixed(2));
     this.steps.push({
       at: this.atLabel(),
-      spawn: [{ id, actor, at: this.roundPt(pt), faction }]
+      spawn: [item]
     });
   }
 
@@ -56,11 +68,27 @@ export class ActionRecorder {
     });
   }
 
-  recordConstruct(id: string, actor: string, pt: Point, faction: Faction = 'blue', durationSec = 1.8): void {
+  recordConstruct(id: string, actor: string, pt: Point, faction: Faction = 'blue', durationSec = 1.8, scale?: number): void {
+    if (!this.isRecording) return;
+    const item: NonNullable<ScenarioStep['construct']> = {
+      id,
+      actor,
+      at: this.roundPt(pt),
+      faction,
+      duration: `${durationSec}s`
+    };
+    if (scale !== undefined && Math.abs(scale - 1) > 0.01) item.scale = Number(scale.toFixed(2));
+    this.steps.push({
+      at: this.atLabel(),
+      construct: item
+    });
+  }
+
+  recordResize(entityId: string, scale: number): void {
     if (!this.isRecording) return;
     this.steps.push({
       at: this.atLabel(),
-      construct: { id, actor, at: this.roundPt(pt), faction, duration: `${durationSec}s` }
+      resize: { entity: entityId, scale: Number(scale.toFixed(2)) }
     });
   }
 
@@ -88,6 +116,24 @@ export class ActionRecorder {
   recordPulse(pt: Point, color = '#ef4444'): void {
     if (!this.isRecording) return;
     this.steps.push({ at: this.atLabel(), pulse: { at: this.roundPt(pt), color, radius: 70 } });
+  }
+
+  recordStrike(
+    mode: 'airstrike' | 'missile',
+    to: Point,
+    attacker?: string,
+    from?: Point,
+    radius?: number
+  ): void {
+    if (!this.isRecording) return;
+    const strike: NonNullable<ScenarioStep['strike']> = {
+      mode,
+      to: this.roundPt(to)
+    };
+    if (attacker) strike.attacker = attacker;
+    if (from) strike.from = this.roundPt(from);
+    if (radius !== undefined) strike.radius = radius;
+    this.steps.push({ at: this.atLabel(), strike });
   }
 
   recordCaption(text: string): void {

@@ -2,6 +2,7 @@ import { ActorPack, ActorTemplate, MapPack, PackBundle, SavedScenarioRecord } fr
 import { buildWorldMapPack } from '../maps/worldGeoEngine';
 import { studioDb } from '../storage/studioDb';
 import { DEMO_ACTORS, DEMO_MAPS, TEMPLATES } from './demoPacks';
+import { validatePackBundle } from './packSchema';
 
 export const ACTOR_TEMPLATES: Record<string, ActorTemplate> = TEMPLATES;
 
@@ -98,6 +99,8 @@ export class PackRegistry {
   }
 
   async importBundle(bundle: PackBundle): Promise<{ mapsAdded: number; actorsAdded: number }> {
+    const errors = validatePackBundle(bundle);
+    if (errors.length > 0) throw new Error(errors.slice(0, 5).join(' | '));
     for (const m of bundle.maps ?? []) await this.saveCustomMap(m);
     for (const a of bundle.actors ?? []) await this.saveCustomActor(a);
     return { mapsAdded: bundle.maps?.length ?? 0, actorsAdded: bundle.actors?.length ?? 0 };

@@ -132,7 +132,7 @@ function rasterizeLandNavGrid(
   const pixels = ctx.getImageData(0, 0, cols, rows).data;
   const navGrid: NavCell[] = new Array(cols * rows).fill(1); // 1 = بحر
   for (let i = 0; i < cols * rows; i++) {
-    if (pixels[i * 4] > 90) navGrid[i] = 0; // 0 = يابسة
+    if (pixels[i * 4] > 28) navGrid[i] = 0; // 0 = يابسة (يشمل حواف السواحل والجزر الدقيقة)
   }
   return { cols, rows, navGrid };
 }

@@ -8,7 +8,28 @@ export default defineConfig(() => {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(import.meta.dirname, '.'),
+      },
+    },
+    build: {
+      chunkSizeWarningLimit: 650,
+      rolldownOptions: {
+        output: {
+          manualChunks(id: string) {
+            if (id.includes('node_modules/pixi.js')) return 'vendor-pixi';
+            if (
+              id.includes('node_modules/world-atlas') ||
+              id.includes('node_modules/i18n-iso-countries') ||
+              id.includes('node_modules/d3-geo') ||
+              id.includes('node_modules/topojson-client')
+            ) {
+              return 'vendor-geo';
+            }
+            if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
+              return 'vendor-react';
+            }
+          },
+        },
       },
     },
     server: {

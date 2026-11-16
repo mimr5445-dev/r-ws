@@ -267,7 +267,10 @@ export function PackBuilderPanel({
             <option value="_person">قالب: شخصية (_person)</option>
             <option value="_vehicle">قالب: آلية برية (_vehicle)</option>
             <option value="_ship">قالب: سفينة (_ship)</option>
-            <option value="_building">قالب: مبنى (_building)</option>
+            <option value="_carrier">قالب: حاملة طائرات (_carrier)</option>
+            <option value="_air">قالب: مقاتلة / طائرة (_air)</option>
+            <option value="_heli">قالب: مروحية (_heli)</option>
+            <option value="_building">قالب: مبنى / منشأة (_building)</option>
           </select>
 
           <input
