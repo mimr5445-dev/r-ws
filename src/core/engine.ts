@@ -31,11 +31,26 @@ function resolvePoint(map: MapPack, ref: PointRef | undefined): Point | undefine
 export const TICK_RATE = 30;
 export const DT = 1 / TICK_RATE;
 
+const STRICT_SEC_RE = /^(?:\d+(?:\.\d+)?|\.\d+)(?:\s*s)?$/i;
+
+export function parseStrictSec(val: unknown): number | null {
+  if (typeof val === 'number') {
+    return Number.isFinite(val) && val >= 0 ? val : null;
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed || !STRICT_SEC_RE.test(trimmed)) return null;
+    const numericPart = trimmed.replace(/\s*s$/i, '');
+    const n = Number(numericPart);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  }
+  return null;
+}
+
 export function parseSec(val?: string | number, fallback = 0): number {
-  if (val === undefined || val === null) return fallback;
-  if (typeof val === 'number') return Number.isFinite(val) ? val : fallback;
-  const n = parseFloat(val.replace('s', '').trim());
-  return Number.isFinite(n) ? n : fallback;
+  if (val === undefined || val === null) return Math.max(0, fallback);
+  const parsed = parseStrictSec(val);
+  return parsed !== null ? parsed : Math.max(0, fallback);
 }
 
 export function normalizeAngleDiff(target: number, current: number): number {
@@ -101,10 +116,14 @@ export class StudioEngine {
   }
 
   estimateDurationSec(): number {
-    let maxAt = Math.max(18, parseSec(this.scenario.meta?.duration_hint, 18));
+    const hint = parseStrictSec(this.scenario.meta?.duration_hint);
+    let maxAt = Math.max(18, hint ?? 18);
     const steps = Array.isArray(this.scenario.timeline) ? this.scenario.timeline : [];
     for (const st of steps) {
-      if (st?.at) maxAt = Math.max(maxAt, parseSec(st.at) + 8);
+      if (st?.at !== undefined) {
+        const atSec = parseStrictSec(st.at);
+        if (atSec !== null) maxAt = Math.max(maxAt, atSec + 8);
+      }
     }
     return maxAt;
   }
@@ -453,11 +472,16 @@ export class StudioEngine {
       if (!st || this.executedSteps.has(idx)) return;
       let ready = false;
 
-      if (st.at !== undefined && timeSec >= parseSec(st.at)) {
-        ready = true;
-      } else if (st.after) {
-        const [entityId, event] = st.after.split('.');
-        const ent = this.entities.get(entityId);
+      if (st.at !== undefined) {
+        const atSec = parseStrictSec(st.at);
+        if (atSec !== null && timeSec >= atSec) {
+          ready = true;
+        }
+      } else if (typeof st.after === 'string') {
+        const dotIdx = st.after.indexOf('.');
+        const entityId = dotIdx > 0 ? st.after.slice(0, dotIdx) : '';
+        const event = dotIdx > 0 ? st.after.slice(dotIdx + 1) : '';
+        const ent = entityId ? this.entities.get(entityId) : undefined;
         if (event === 'arrived' && ent && ent.arrivedTick !== null && !ent.isMoving) {
           ready = true;
         }
@@ -519,9 +543,15 @@ export class StudioEngine {
     if (st.construct) {
       const pt = resolvePoint(this.map, st.construct.at);
       if (pt) {
+        let constructId = st.construct.id;
+        if (!constructId) {
+          do {
+            constructId = `bld_${++this.autoCounter}`;
+          } while (this.entities.has(constructId));
+        }
         this.dispatchOrder({
           type: 'construct',
-          id: st.construct.id ?? `bld_${++this.autoCounter}`,
+          id: constructId,
           actorId: st.construct.actor,
           at: pt,
           faction: st.construct.faction ?? 'blue',
@@ -603,6 +633,7 @@ export class StudioEngine {
     while (this.orderQueue.length > 0) {
       const ord = this.orderQueue.shift()!;
       if (ord.type === 'spawn') {
+        if (!ord.id || typeof ord.id !== 'string' || !ord.id.trim() || this.entities.has(ord.id)) continue;
         const act = this.actors[ord.actorId];
         if (!act) continue;
         this.entities.set(ord.id, {
@@ -637,6 +668,7 @@ export class StudioEngine {
         });
         this.emitSound('spawn_pop');
       } else if (ord.type === 'construct') {
+        if (!ord.id || typeof ord.id !== 'string' || !ord.id.trim() || this.entities.has(ord.id)) continue;
         const act = this.actors[ord.actorId];
         if (!act) continue;
         this.entities.set(ord.id, {

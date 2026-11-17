@@ -6,7 +6,7 @@ import { findPath, isWalkable } from './pathfinding';
 import { validateScenario } from './validator';
 import { StudioEngine } from './engine';
 import { buildAiScenarioPrompt, generateCatalogMarkdown } from './catalog';
-import { ScenarioFile } from './types';
+import { MapPack, ScenarioFile } from './types';
 import { DEMO_ACTORS, DEMO_MAPS } from '../packs/demoPacks';
 import { PackRegistry } from '../packs/packRegistry';
 
@@ -462,6 +462,177 @@ test('Ships never climb onto land cells during curved turns and entities support
   replay.seekToTick(30);
   assert.equal(replay.entities.get('c1')?.scaleMul, 0.75);
 });
+
+test('P0 Hardening: all built-in .scenario.yaml files validate cleanly', () => {
+  const worldLiveStub = {
+    ...DEMO_MAPS.geopolitics_strait,
+    id: 'world_live',
+    width: 2000,
+    height: 1000,
+    anchors: {
+      red_sea: { x: 1210, y: 420 },
+      arabian_sea: { x: 1320, y: 460 },
+      riyadh: { x: 1255, y: 395 },
+      mediterranean: { x: 1120, y: 315 },
+      cairo: { x: 1175, y: 365 }
+    }
+  };
+  const mapsLookup: Record<string, MapPack> = { ...DEMO_MAPS, world_live: worldLiveStub };
+  for (const fname of ['strait_crisis', 'valley_advance', 'air_sea_strike', 'world_demo']) {
+    const raw = fs.readFileSync(`src/scenarios/${fname}.scenario.yaml`, 'utf8');
+    const parsed = yaml.load(raw) as ScenarioFile;
+    assert.deepEqual(
+      validateScenario(parsed, mapsLookup[parsed.meta.map], DEMO_ACTORS),
+      [],
+      `${fname}.scenario.yaml must have zero validation issues`
+    );
+  }
+});
+
+test('P0 Hardening: duplicate/empty entity IDs are rejected in validator and refused by StudioEngine', () => {
+  const dupScenario: ScenarioFile = {
+    meta: { title: 'dup ids', map: 'geopolitics_strait' },
+    timeline: [
+      {
+        at: '0s',
+        spawn: [
+          { id: 'u1', actor: 'naval_corvette', at: 'port_south', faction: 'blue' },
+          { id: 'u1', actor: 'heavy_tank', at: 'capital_north', faction: 'red' },
+          { id: '   ', actor: 'heavy_tank', at: 'capital_north', faction: 'blue' }
+        ]
+      },
+      {
+        at: '1s',
+        construct: { id: 'u1', actor: 'radar_outpost', at: 'capital_north', faction: 'red' }
+      }
+    ]
+  };
+  const issues = validateScenario(dupScenario, DEMO_MAPS.geopolitics_strait, DEMO_ACTORS);
+  assert.ok(issues.some((i) => i.field === 'spawn.id' && i.message.includes('مكرر')));
+  assert.ok(issues.some((i) => i.field === 'spawn.id' && i.message.includes('مطلوب')));
+  assert.ok(issues.some((i) => i.field === 'construct.id' && i.message.includes('مكرر')));
+
+  const engine = new StudioEngine(DEMO_MAPS.geopolitics_strait, DEMO_ACTORS, {
+    meta: { title: 'engine no overwrite', map: 'geopolitics_strait' },
+    timeline: [{ at: '0s', spawn: [{ id: 'u1', actor: 'naval_corvette', at: 'port_south', faction: 'blue' }] }]
+  });
+  engine.dispatchOrder({
+    type: 'spawn',
+    id: 'u1',
+    actorId: 'heavy_tank',
+    at: DEMO_MAPS.geopolitics_strait.anchors.capital_north,
+    faction: 'red'
+  });
+  engine.dispatchOrder({
+    type: 'construct',
+    id: 'u1',
+    actorId: 'radar_outpost',
+    at: DEMO_MAPS.geopolitics_strait.anchors.capital_north,
+    faction: 'red',
+    durationSec: 2
+  });
+  engine.flushOrders();
+  assert.equal(engine.entities.get('u1')?.actorId, 'naval_corvette');
+  assert.equal(engine.entities.get('u1')?.faction, 'blue');
+});
+
+test('P0 Hardening: post-remove and out-of-order entity lifecycle rules work accurately', () => {
+  // Rejects provably post-removal move/resize/remove/callout and pre-creation move
+  const badLifecycle: ScenarioFile = {
+    meta: { title: 'bad lifecycle', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0.5s', move: { entity: 's1', to: 'strait_gate' } },
+      { at: '1s', spawn: [{ id: 's1', actor: 'naval_corvette', at: 'port_south' }] },
+      { at: '2s', remove: { entity: 's1' } },
+      { at: '3s', resize: { entity: 's1', scale: 1.5 }, callout: { id: 'c1', target: 's1', text: 'ghost' }, remove: { entity: 's1' } }
+    ]
+  };
+  const badIssues = validateScenario(badLifecycle, DEMO_MAPS.geopolitics_strait, DEMO_ACTORS);
+  assert.ok(badIssues.some((i) => i.stepIndex === 0 && i.field === 'move.entity'));
+  assert.ok(badIssues.some((i) => i.stepIndex === 3 && i.field === 'resize.entity'));
+  assert.ok(badIssues.some((i) => i.stepIndex === 3 && i.field === 'callout.target'));
+  assert.ok(badIssues.some((i) => i.stepIndex === 3 && i.field === 'remove.entity'));
+
+  // Same `after` trigger removing then using in later step index must be rejected
+  const sameAfterRemoval: ScenarioFile = {
+    meta: { title: 'same trigger remove', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 'scout', actor: 'naval_corvette', at: 'port_south' }, { id: 'b1', actor: 'radar_outpost', at: 'capital_north' }] },
+      { at: '0.2s', move: { entity: 'scout', to: 'strait_gate' } },
+      { after: 'scout.arrived', remove: { entity: 'b1' } },
+      { after: 'scout.arrived', resize: { entity: 'b1', scale: 1.2 } }
+    ]
+  };
+  const sameTrigIssues = validateScenario(sameAfterRemoval, DEMO_MAPS.geopolitics_strait, DEMO_ACTORS);
+  assert.ok(sameTrigIssues.some((i) => i.stepIndex === 3 && i.field === 'resize.entity'));
+
+  // Accepts valid out-of-order `at` timeline AND valid cross-branch `after` referencing unit removed at later `at`
+  const validOutOfOrderAndConditional: ScenarioFile = {
+    meta: { title: 'valid timeline', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 's1', actor: 'naval_corvette', at: 'port_south' }, { id: 's2', actor: 'naval_corvette', at: 'port_south' }] },
+      { at: '0.5s', move: { entity: 's1', to: 'strait_gate' } },
+      { at: '12s', remove: { entity: 's2' } },
+      { at: '4s', resize: { entity: 's2', scale: 1.3 } },
+      { after: 's1.arrived', move: { entity: 's2', to: 'port_east' } }
+    ]
+  };
+  assert.deepEqual(validateScenario(validOutOfOrderAndConditional, DEMO_MAPS.geopolitics_strait, DEMO_ACTORS), []);
+});
+
+test('P0 Hardening: strict timing, at+after conflict, map bounds, and numeric limits are enforced', async () => {
+  const { parseStrictSec } = await import('./engine');
+  assert.equal(parseStrictSec('0s'), 0);
+  assert.equal(parseStrictSec('2.5s'), 2.5);
+  assert.equal(parseStrictSec(1.5), 1.5);
+  assert.equal(parseStrictSec('-5s'), null);
+  assert.equal(parseStrictSec('12abc'), null);
+  assert.equal(parseStrictSec('5ms'), null);
+  assert.equal(parseStrictSec(''), null);
+  assert.equal(parseStrictSec(Infinity), null);
+  assert.equal(parseStrictSec(NaN), null);
+
+  const badInputs: ScenarioFile = {
+    meta: { title: 'bad params', map: 'geopolitics_strait', duration_hint: '0s' },
+    timeline: [
+      { at: '-2s', caption: { text: 'neg' } },
+      { at: '12abc', caption: { text: 'malformed' } },
+      { at: '1s', after: 'u1.arrived', caption: { text: 'conflict' } },
+      {
+        at: '0s',
+        spawn: [{ id: 'u1', actor: 'naval_corvette', at: { x: 9999, y: -10 } }],
+        camera: { focus: 'port_south', zoom: 99, duration: '-1s' },
+        zone: { id: 'strait_choke', color: '#ef4444', opacity: 2.5, duration: '0s' },
+        pulse: { at: 'port_south', radius: 0 },
+        strike: { mode: 'missile', to: 'port_south', radius: -20 }
+      }
+    ]
+  };
+  const issues = validateScenario(badInputs, DEMO_MAPS.geopolitics_strait, DEMO_ACTORS);
+  for (const expectedField of [
+    'meta.duration_hint',
+    'at',
+    'at/after',
+    'spawn.at',
+    'camera.zoom',
+    'camera.duration',
+    'zone.opacity',
+    'zone.duration',
+    'pulse.radius',
+    'strike.radius'
+  ]) {
+    assert.ok(issues.some((i) => i.field === expectedField), `expected validation issue for ${expectedField}`);
+  }
+
+  // Malformed `at` must NOT execute at tick 0 in StudioEngine
+  const engine = new StudioEngine(DEMO_MAPS.geopolitics_strait, DEMO_ACTORS, {
+    meta: { title: 'malformed at', map: 'geopolitics_strait' },
+    timeline: [{ at: 'abc', caption: { text: 'should never run' } }]
+  });
+  engine.step();
+  assert.equal(engine.caption, '');
+});
+
 
 
 

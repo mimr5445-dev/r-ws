@@ -1,23 +1,23 @@
 import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import { StudioEngine, normalizeAngleDiff } from '../core/engine';
 import { EntityState, Faction, MapPack, Point } from '../core/types';
-import { isSafeAssetUrl } from '../packs/packSchema';
+import { sanitizeAssetUrl } from '../packs/packSchema';
 
 async function loadSvgOrUrlTexture(src: string, fallbackW = 128, fallbackH = 128): Promise<Texture> {
-  const trimmed = src.trim();
-  const isSvg = trimmed.startsWith('<svg');
-  if (!isSvg && !isSafeAssetUrl(src)) return Texture.EMPTY;
-  let url = src;
+  const safeSrc = sanitizeAssetUrl(src);
+  if (!safeSrc) return Texture.EMPTY;
+  const isSvg = safeSrc.startsWith('<svg');
+  let url = safeSrc;
   let w = fallbackW;
   let h = fallbackH;
 
   if (isSvg) {
-    const vbMatch = trimmed.match(/viewBox=["']\s*[\d.-]+\s+[\d.-]+\s+([\d.]+)\s+([\d.]+)\s*["']/i);
+    const vbMatch = safeSrc.match(/viewBox=["']\s*[\d.-]+\s+[\d.-]+\s+([\d.]+)\s+([\d.]+)\s*["']/i);
     if (vbMatch) {
       w = Math.max(1, Math.round(parseFloat(vbMatch[1])));
       h = Math.max(1, Math.round(parseFloat(vbMatch[2])));
     }
-    let normalizedSvg = trimmed;
+    let normalizedSvg = safeSrc;
     if (!/\bwidth=/.test(normalizedSvg.slice(0, 220))) {
       normalizedSvg = normalizedSvg.replace('<svg', `<svg width="${w}" height="${h}"`);
     }

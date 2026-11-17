@@ -1,4 +1,5 @@
-import { ActorPack, MapPack, PointRef, ScenarioFile, ValidationIssue } from './types';
+import { parseStrictSec } from './engine';
+import { ActorPack, MapPack, PointRef, ScenarioFile, ScenarioStep, ValidationIssue } from './types';
 
 function closestKey(target: string, keys: string[]): string | null {
   let best: string | null = null;
@@ -26,6 +27,47 @@ const VALID_SOUNDS = new Set([
   'explosion',
   'ship_horn'
 ]);
+const VALID_ENTITY_ID_RE = /^[^\s.]+$/;
+const AFTER_TRIGGER_RE = /^([^\s.]+)\.arrived$/;
+
+const isPlainObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+type StepTrigger =
+  | { type: 'at'; atSec: number }
+  | { type: 'after'; targetId: string }
+  | { type: 'invalid' };
+
+interface CreationRecord {
+  id: string;
+  stepIndex: number;
+  kind: 'spawn' | 'construct';
+  trigger: StepTrigger;
+}
+
+interface RemovalRecord {
+  id: string;
+  stepIndex: number;
+  trigger: StepTrigger;
+}
+
+function parseStepTrigger(step: ScenarioStep): StepTrigger {
+  const hasAt = step.at !== undefined;
+  const hasAfter = step.after !== undefined;
+  if (hasAt && !hasAfter) {
+    const atSec = parseStrictSec(step.at);
+    return atSec !== null ? { type: 'at', atSec } : { type: 'invalid' };
+  }
+  if (hasAfter && !hasAt && typeof step.after === 'string') {
+    const m = AFTER_TRIGGER_RE.exec(step.after);
+    if (m) return { type: 'after', targetId: m[1] };
+  }
+  return { type: 'invalid' };
+}
+
+function isValidEntityId(id: unknown): id is string {
+  return typeof id === 'string' && id.trim().length > 0 && id.trim() === id && VALID_ENTITY_ID_RE.test(id);
+}
 
 export function validateScenario(
   scenario: ScenarioFile,
@@ -33,11 +75,11 @@ export function validateScenario(
   actors: Record<string, ActorPack>
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!scenario || typeof scenario !== 'object' || Array.isArray(scenario)) {
+  if (!isPlainObj(scenario)) {
     issues.push({ stepIndex: -1, field: 'root', message: 'ملف السيناريو يجب أن يكون كائن YAML صالحًا' });
     return issues;
   }
-  if (!scenario.meta?.map) {
+  if (!isPlainObj(scenario.meta) || typeof scenario.meta.map !== 'string' || !scenario.meta.map.trim()) {
     issues.push({ stepIndex: -1, field: 'meta.map', message: 'يجب تحديد اسم الخريطة في meta.map' });
     return issues;
   }
@@ -45,15 +87,89 @@ export function validateScenario(
     issues.push({ stepIndex: -1, field: 'meta.map', message: `الخريطة "${scenario.meta.map}" غير موجودة في قاعدة البيانات` });
     return issues;
   }
+  if (scenario.meta.duration_hint !== undefined) {
+    const hint = parseStrictSec(scenario.meta.duration_hint);
+    if (hint === null || hint <= 0) {
+      issues.push({ stepIndex: -1, field: 'meta.duration_hint', message: 'meta.duration_hint يجب أن يكون مدة زمنية موجبة مثل "42s"' });
+    }
+  }
   if (scenario.timeline !== undefined && !Array.isArray(scenario.timeline)) {
     issues.push({ stepIndex: -1, field: 'timeline', message: 'timeline يجب أن يكون قائمة من الخطوات' });
     return issues;
   }
 
+  const timeline = scenario.timeline ?? [];
   const anchorKeys = Object.keys(map.anchors);
   const zoneKeys = Object.keys(map.zones);
   const actorKeys = Object.keys(actors);
-  const spawnedIds = new Set<string>();
+  const maxRadius = Math.max(map.width, map.height) * 2;
+
+  // Pass 1: Index all entity creations, removals, and timed moves for lifecycle causality analysis.
+  const stepTriggers: StepTrigger[] = [];
+  const creationsById = new Map<string, CreationRecord[]>();
+  const removalsById = new Map<string, RemovalRecord[]>();
+  const earliestAtMoveById = new Map<string, number>();
+
+  timeline.forEach((rawStep, idx) => {
+    if (!isPlainObj(rawStep)) {
+      stepTriggers.push({ type: 'invalid' });
+      return;
+    }
+    const step = rawStep as unknown as ScenarioStep;
+    const trigger = parseStepTrigger(step);
+    stepTriggers.push(trigger);
+
+    if (Array.isArray(step.spawn)) {
+      for (const s of step.spawn) {
+        if (isPlainObj(s) && isValidEntityId(s.id)) {
+          const list = creationsById.get(s.id) ?? [];
+          list.push({ id: s.id, stepIndex: idx, kind: 'spawn', trigger });
+          creationsById.set(s.id, list);
+        }
+      }
+    }
+    if (isPlainObj(step.construct) && isValidEntityId(step.construct.id)) {
+      const list = creationsById.get(step.construct.id) ?? [];
+      list.push({ id: step.construct.id, stepIndex: idx, kind: 'construct', trigger });
+      creationsById.set(step.construct.id, list);
+    }
+    if (isPlainObj(step.remove) && isValidEntityId(step.remove.entity)) {
+      const list = removalsById.get(step.remove.entity) ?? [];
+      list.push({ id: step.remove.entity, stepIndex: idx, trigger });
+      removalsById.set(step.remove.entity, list);
+    }
+    if (isPlainObj(step.move) && isValidEntityId(step.move.entity) && trigger.type === 'at') {
+      const prev = earliestAtMoveById.get(step.move.entity);
+      if (prev === undefined || trigger.atSec < prev) {
+        earliestAtMoveById.set(step.move.entity, trigger.atSec);
+      }
+    }
+  });
+
+  // Detect indirect circular `after` dependency chains among entity creations.
+  const creatorTriggerCycleIds = new Set<string>();
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const detectCycle = (id: string, stack: Set<string>): boolean => {
+    if (stack.has(id)) return true;
+    if (visited.has(id)) return false;
+    visited.add(id);
+    stack.add(id);
+    const primary = creationsById.get(id)?.[0];
+    if (primary?.trigger.type === 'after') {
+      if (detectCycle(primary.trigger.targetId, stack)) {
+        creatorTriggerCycleIds.add(id);
+        stack.delete(id);
+        return true;
+      }
+    }
+    stack.delete(id);
+    return false;
+  };
+  for (const id of creationsById.keys()) {
+    visiting.clear();
+    detectCycle(id, visiting);
+  }
 
   const checkPointRef = (stepIdx: number, field: string, ref: PointRef | undefined) => {
     if (!ref) {
@@ -69,54 +185,280 @@ export function validateScenario(
           message: `نقطة غير معروفة "${ref}"${hint ? ` — هل تقصد "${hint}"؟` : ''}`
         });
       }
-    } else if (typeof ref.x !== 'number' || typeof ref.y !== 'number' || !Number.isFinite(ref.x) || !Number.isFinite(ref.y)) {
-      issues.push({ stepIndex: stepIdx, field, message: 'الإحداثيات {x, y} غير صالحة' });
+      return;
     }
-  };
-
-  const checkActor = (stepIdx: number, field: string, name: string) => {
-    if (!actors[name]) {
-      const hint = closestKey(name, actorKeys);
+    if (!isPlainObj(ref) || typeof ref.x !== 'number' || typeof ref.y !== 'number' || !Number.isFinite(ref.x) || !Number.isFinite(ref.y)) {
+      issues.push({ stepIndex: stepIdx, field, message: 'الإحداثيات {x, y} غير صالحة' });
+      return;
+    }
+    if (ref.x < 0 || ref.x > map.width || ref.y < 0 || ref.y > map.height) {
       issues.push({
         stepIndex: stepIdx,
         field,
-        message: `كيان غير معروف "${name}"${hint ? ` — هل تقصد "${hint}"؟` : ''}`
+        message: `الإحداثيات (${ref.x}, ${ref.y}) خارج حدود الخريطة [0..${map.width} × 0..${map.height}]`
       });
     }
   };
 
-  (scenario.timeline ?? []).forEach((step, idx) => {
-    if (!step || typeof step !== 'object') {
+  const checkActor = (stepIdx: number, field: string, name: unknown) => {
+    if (typeof name !== 'string' || !actors[name]) {
+      const hint = typeof name === 'string' ? closestKey(name, actorKeys) : null;
+      issues.push({
+        stepIndex: stepIdx,
+        field,
+        message: `كيان غير معروف "${String(name ?? '')}"${hint ? ` — هل تقصد "${hint}"؟` : ''}`
+      });
+    }
+  };
+
+  const checkDurationField = (stepIdx: number, field: string, val: unknown, allowZero = false) => {
+    const parsed = parseStrictSec(val);
+    if (parsed === null || (!allowZero && parsed <= 0)) {
+      issues.push({
+        stepIndex: stepIdx,
+        field,
+        message: allowZero
+          ? `المدة "${String(val)}" يجب أن تكون رقمًا غير سالب مثل "1.2s"`
+          : `المدة "${String(val)}" يجب أن تكون رقمًا موجبًا أكبر من صفر مثل "1.5s"`
+      });
+    }
+  };
+
+  const isTriggerProvablyAfterRemoval = (refTrigger: StepTrigger, refIdx: number, rem: RemovalRecord): boolean => {
+    // Same step execution order in StudioEngine.executeStep:
+    // spawn -> move -> resize -> remove -> construct -> strike -> draw_arrow -> zone -> callout
+    if (rem.stepIndex === refIdx) return false; // handled specifically by caller when needed
+    if (refTrigger.type === 'at' && rem.trigger.type === 'at') {
+      return refTrigger.atSec > rem.trigger.atSec || (refTrigger.atSec === rem.trigger.atSec && refIdx > rem.stepIndex);
+    }
+    if (refTrigger.type === 'after' && rem.trigger.type === 'after' && refTrigger.targetId === rem.trigger.targetId) {
+      return refIdx > rem.stepIndex;
+    }
+    // Cross-branch: if ref waits on `after: X.arrived`, check whether X can only be created or moved after `rem`
+    if (refTrigger.type === 'after' && rem.trigger.type === 'at') {
+      const depCreator = creationsById.get(refTrigger.targetId)?.[0];
+      if (depCreator?.trigger.type === 'at' && depCreator.trigger.atSec > rem.trigger.atSec) {
+        return true;
+      }
+      const depMove = earliestAtMoveById.get(refTrigger.targetId);
+      if (depCreator?.trigger.type === 'at' && depMove !== undefined && depMove >= rem.trigger.atSec) {
+        return true;
+      }
+    }
+    // Otherwise (cross-branch timed vs conditional whose wall-clock order depends on A*/speed),
+    // arrival order is statically indeterminate; do not falsely reject valid scenarios.
+    return false;
+  };
+
+  const checkEntityLifecycle = (
+    stepIdx: number,
+    field: string,
+    targetId: unknown,
+    op: 'after' | 'move' | 'resize' | 'remove' | 'callout' | 'strike_attacker'
+  ) => {
+    if (!isValidEntityId(targetId)) {
+      issues.push({
+        stepIndex: stepIdx,
+        field,
+        message: op === 'after'
+          ? `محفز after غير صالح لوحدة فارغة أو غير صالحة`
+          : `معرّف الوحدة في ${field} مفقود أو غير صالح`
+      });
+      return;
+    }
+
+    const creations = creationsById.get(targetId);
+    if (!creations || creations.length === 0) {
+      if (op === 'callout') {
+        issues.push({
+          stepIndex: stepIdx,
+          field,
+          message: `الهدف "${targetId}" ليس مرسى في الخريطة ولا وحدة منشأة`
+        });
+      } else if (op === 'after') {
+        issues.push({
+          stepIndex: stepIdx,
+          field: 'after',
+          message: `محفز after "${targetId}.arrived" يشير إلى وحدة غير منشأة في السيناريو`
+        });
+      } else {
+        issues.push({
+          stepIndex: stepIdx,
+          field,
+          message: `الوحدة "${targetId}" لم تُنشأ في السيناريو`
+        });
+      }
+      return;
+    }
+
+    const creator = creations[0];
+    const refTrigger = stepTriggers[stepIdx];
+
+    if (op === 'after' && creator.stepIndex === stepIdx) {
+      issues.push({
+        stepIndex: stepIdx,
+        field: 'after',
+        message: `الخطوة لا يمكنها انتظار arrived للوحدة "${targetId}" التي تُنشأ في نفس الخطوة`
+      });
+      return;
+    }
+
+    if (op === 'after' && creatorTriggerCycleIds.has(targetId)) {
+      issues.push({
+        stepIndex: stepIdx,
+        field: 'after',
+        message: `دورة اعتماد شرطية (after cycle) تمنع إنشاء الوحدة "${targetId}"`
+      });
+      return;
+    }
+
+    // Creation causality: in executeStep, construct runs AFTER move/resize/remove.
+    if (creator.stepIndex === stepIdx && creator.kind === 'construct' && (op === 'move' || op === 'resize' || op === 'remove')) {
+      issues.push({
+        stepIndex: stepIdx,
+        field,
+        message: `لا يمكن تنفيذ ${op} على "${targetId}" في نفس خطوة construct قبل اكتمال إنشائها`
+      });
+      return;
+    }
+
+    // Both timed via `at`: check chronological order (atSec, stepIndex).
+    if (refTrigger.type === 'at' && creator.trigger.type === 'at') {
+      if (
+        refTrigger.atSec < creator.trigger.atSec ||
+        (refTrigger.atSec === creator.trigger.atSec && stepIdx < creator.stepIndex)
+      ) {
+        issues.push({
+          stepIndex: stepIdx,
+          field,
+          message: `الوحدة "${targetId}" تُستخدم في ت=${refTrigger.atSec}s قبل إنشائها في ت=${creator.trigger.atSec}s`
+        });
+        return;
+      }
+    }
+
+    // Timed ref waiting on an `after` creator whose dependency cannot arrive before `refTrigger.atSec`.
+    if (refTrigger.type === 'at' && creator.trigger.type === 'after') {
+      const depCreator = creationsById.get(creator.trigger.targetId)?.[0];
+      if (depCreator?.trigger.type === 'at' && depCreator.trigger.atSec > refTrigger.atSec) {
+        issues.push({
+          stepIndex: stepIdx,
+          field,
+          message: `الوحدة "${targetId}" تعتمد في إنشائها على "${creator.trigger.targetId}" الذي يُنشأ بعد ت=${refTrigger.atSec}s`
+        });
+        return;
+      }
+    }
+
+    // Post-removal causality checks.
+    const removals = removalsById.get(targetId) ?? [];
+    for (const rem of removals) {
+      if (rem.stepIndex === stepIdx) {
+        if (op === 'remove') continue;
+        // Same step has both `remove` and another action on the same entity
+        if (op === 'callout' || op === 'strike_attacker' || op === 'after' || op === 'move' || op === 'resize') {
+          issues.push({
+            stepIndex: stepIdx,
+            field,
+            message: `لا يمكن استخدام الوحدة "${targetId}" في نفس الخطوة التي يتم حذفها فيها`
+          });
+          return;
+        }
+      } else if (isTriggerProvablyAfterRemoval(refTrigger, stepIdx, rem)) {
+        issues.push({
+          stepIndex: stepIdx,
+          field,
+          message: op === 'remove'
+            ? `الوحدة "${targetId}" تم حذفها مسبقًا ولا يمكن حذفها مرة أخرى`
+            : `الوحدة "${targetId}" تم حذفها مسبقًا ولا يمكن استخدامها بعد الإزالة`
+        });
+        return;
+      }
+    }
+  };
+
+  // Pass 2: Validate every step in deterministic field order.
+  const seenCreatedIds = new Set<string>();
+
+  timeline.forEach((rawStep, idx) => {
+    if (!isPlainObj(rawStep)) {
       issues.push({ stepIndex: idx, field: 'step', message: 'الخطوة فارغة أو غير صالحة' });
       return;
     }
-    if (!step.at && !step.after) {
+    const step = rawStep as unknown as ScenarioStep;
+
+    const hasAt = step.at !== undefined;
+    const hasAfter = step.after !== undefined;
+    if (!hasAt && !hasAfter) {
       issues.push({ stepIndex: idx, field: 'at/after', message: 'كل خطوة تحتاج توقيت at أو محفز after' });
-    }
-    if (step.after) {
-      const [entId, ev] = String(step.after).split('.');
-      if (!entId || ev !== 'arrived' || !spawnedIds.has(entId)) {
+    } else if (hasAt && hasAfter) {
+      issues.push({ stepIndex: idx, field: 'at/after', message: 'لا يمكن الجمع بين التوقيت at والمحفز الشرطي after في نفس الخطوة' });
+    } else if (hasAt) {
+      const parsedAt = parseStrictSec(step.at);
+      if (parsedAt === null) {
+        issues.push({
+          stepIndex: idx,
+          field: 'at',
+          message: `توقيت at "${String(step.at)}" غير صالح — يجب أن يكون رقمًا غير سالب مثل "0s" أو "2.5s"`
+        });
+      }
+    } else if (hasAfter) {
+      const m = typeof step.after === 'string' ? AFTER_TRIGGER_RE.exec(step.after) : null;
+      if (!m) {
         issues.push({
           stepIndex: idx,
           field: 'after',
-          message: `محفز after "${step.after}" يجب أن يكون بصيغة "<entityId>.arrived" لوحدة مُنشأة مسبقًا`
+          message: `محفز after "${String(step.after)}" يجب أن يكون بصيغة "<entityId>.arrived"`
         });
+      } else {
+        checkEntityLifecycle(idx, 'after', m[1], 'after');
       }
     }
-    if (step.sound !== undefined && !VALID_SOUNDS.has(step.sound)) {
-      issues.push({ stepIndex: idx, field: 'sound', message: `صوت غير معروف "${step.sound}"` });
+
+    if (step.sound !== undefined && (typeof step.sound !== 'string' || !VALID_SOUNDS.has(step.sound))) {
+      issues.push({ stepIndex: idx, field: 'sound', message: `صوت غير معروف "${String(step.sound)}"` });
     }
-    if (step.camera) checkPointRef(idx, 'camera.focus', step.camera.focus);
-    if (step.spawn) {
+
+    if (step.caption !== undefined) {
+      if (!isPlainObj(step.caption) || typeof step.caption.text !== 'string') {
+        issues.push({ stepIndex: idx, field: 'caption.text', message: 'caption.text يجب أن يكون نصًا' });
+      }
+    }
+
+    if (step.camera !== undefined) {
+      if (!isPlainObj(step.camera)) {
+        issues.push({ stepIndex: idx, field: 'camera', message: 'camera يجب أن يكون كائنًا' });
+      } else {
+        checkPointRef(idx, 'camera.focus', step.camera.focus);
+        if (typeof step.camera.zoom !== 'number' || !Number.isFinite(step.camera.zoom) || step.camera.zoom < 0.25 || step.camera.zoom > 4) {
+          issues.push({ stepIndex: idx, field: 'camera.zoom', message: 'camera.zoom يجب أن يكون رقمًا بين 0.25 و 4' });
+        }
+        if (step.camera.duration !== undefined) {
+          checkDurationField(idx, 'camera.duration', step.camera.duration, true);
+        }
+      }
+    }
+
+    if (step.spawn !== undefined) {
       if (!Array.isArray(step.spawn)) {
         issues.push({ stepIndex: idx, field: 'spawn', message: 'spawn يجب أن يكون قائمة وحدات' });
       } else {
         for (const s of step.spawn) {
-          spawnedIds.add(s.id);
+          if (!isPlainObj(s)) {
+            issues.push({ stepIndex: idx, field: 'spawn', message: 'عنصر spawn يجب أن يكون كائنًا صالحًا' });
+            continue;
+          }
+          if (!isValidEntityId(s.id)) {
+            issues.push({ stepIndex: idx, field: 'spawn.id', message: 'معرّف الوحدة في spawn.id مطلوب ولا يقبل فراغات أو نقاط' });
+          } else if (seenCreatedIds.has(s.id)) {
+            issues.push({ stepIndex: idx, field: 'spawn.id', message: `معرّف الوحدة "${s.id}" مكرر — يجب أن يكون فريدًا في السيناريو` });
+          } else {
+            seenCreatedIds.add(s.id);
+          }
           checkActor(idx, 'spawn.actor', s.actor);
-          checkPointRef(idx, 'spawn.at', s.at);
-          if (s.faction !== undefined && !VALID_FACTIONS.has(s.faction)) {
-            issues.push({ stepIndex: idx, field: 'spawn.faction', message: `فصيل غير معروف "${s.faction}"` });
+          checkPointRef(idx, 'spawn.at', s.at as PointRef | undefined);
+          if (s.faction !== undefined && (typeof s.faction !== 'string' || !VALID_FACTIONS.has(s.faction))) {
+            issues.push({ stepIndex: idx, field: 'spawn.faction', message: `فصيل غير معروف "${String(s.faction)}"` });
           }
           if (s.scale !== undefined && (typeof s.scale !== 'number' || !Number.isFinite(s.scale) || s.scale < 0.2 || s.scale > 4)) {
             issues.push({ stepIndex: idx, field: 'spawn.scale', message: 'معامل الحجم scale يجب أن يكون رقمًا بين 0.2 و 4' });
@@ -124,76 +466,153 @@ export function validateScenario(
         }
       }
     }
-    if (step.pulse) checkPointRef(idx, 'pulse.at', step.pulse.at);
-    if (step.move) {
-      if (!spawnedIds.has(step.move.entity)) {
-        issues.push({ stepIndex: idx, field: 'move.entity', message: `الوحدة "${step.move.entity}" لم تُنشأ قبل هذا الأمر` });
-      }
-      checkPointRef(idx, 'move.to', step.move.to);
-    }
-    if (step.resize) {
-      if (!spawnedIds.has(step.resize.entity)) {
-        issues.push({ stepIndex: idx, field: 'resize.entity', message: `الوحدة "${step.resize.entity}" لم تُنشأ قبل تغيير حجمها` });
-      }
-      if (typeof step.resize.scale !== 'number' || !Number.isFinite(step.resize.scale) || step.resize.scale < 0.2 || step.resize.scale > 4) {
-        issues.push({ stepIndex: idx, field: 'resize.scale', message: 'معامل الحجم scale يجب أن يكون رقمًا بين 0.2 و 4' });
+
+    if (step.pulse !== undefined) {
+      if (!isPlainObj(step.pulse)) {
+        issues.push({ stepIndex: idx, field: 'pulse', message: 'pulse يجب أن يكون كائنًا' });
+      } else {
+        checkPointRef(idx, 'pulse.at', step.pulse.at as PointRef | undefined);
+        if (step.pulse.radius !== undefined && (typeof step.pulse.radius !== 'number' || !Number.isFinite(step.pulse.radius) || step.pulse.radius <= 0 || step.pulse.radius > maxRadius)) {
+          issues.push({ stepIndex: idx, field: 'pulse.radius', message: `pulse.radius يجب أن يكون رقمًا موجبًا ضمن 0..${maxRadius}` });
+        }
       }
     }
-    if (step.remove && !spawnedIds.has(step.remove.entity)) {
-      issues.push({ stepIndex: idx, field: 'remove.entity', message: `الوحدة "${step.remove.entity}" غير موجودة للإزالة` });
-    }
-    if (step.construct) {
-      if (step.construct.id) spawnedIds.add(step.construct.id);
-      checkActor(idx, 'construct.actor', step.construct.actor);
-      checkPointRef(idx, 'construct.at', step.construct.at);
-      if (step.construct.faction !== undefined && !VALID_FACTIONS.has(step.construct.faction)) {
-        issues.push({ stepIndex: idx, field: 'construct.faction', message: `فصيل غير معروف "${step.construct.faction}"` });
-      }
-      if (step.construct.scale !== undefined && (typeof step.construct.scale !== 'number' || !Number.isFinite(step.construct.scale) || step.construct.scale < 0.2 || step.construct.scale > 4)) {
-        issues.push({ stepIndex: idx, field: 'construct.scale', message: 'معامل الحجم scale يجب أن يكون رقمًا بين 0.2 و 4' });
+
+    if (step.move !== undefined) {
+      if (!isPlainObj(step.move)) {
+        issues.push({ stepIndex: idx, field: 'move', message: 'move يجب أن يكون كائنًا' });
+      } else {
+        checkEntityLifecycle(idx, 'move.entity', step.move.entity, 'move');
+        checkPointRef(idx, 'move.to', step.move.to as PointRef | undefined);
       }
     }
-    if (step.draw_arrow) {
-      checkPointRef(idx, 'draw_arrow.from', step.draw_arrow.from);
-      checkPointRef(idx, 'draw_arrow.to', step.draw_arrow.to);
-    }
-    if (step.zone && !map.zones[step.zone.id]) {
-      const hint = closestKey(step.zone.id, zoneKeys);
-      issues.push({
-        stepIndex: idx,
-        field: 'zone.id',
-        message: `منطقة غير معروفة "${step.zone.id}"${hint ? ` — هل تقصد "${hint}"؟` : ''}`
-      });
-    }
-    if (step.callout) {
-      const t = step.callout.target;
-      if (!map.anchors[t] && !spawnedIds.has(t)) {
-        issues.push({
-          stepIndex: idx,
-          field: 'callout.target',
-          message: `الهدف "${t}" ليس مرسى في الخريطة ولا وحدة منشأة`
-        });
+
+    if (step.resize !== undefined) {
+      if (!isPlainObj(step.resize)) {
+        issues.push({ stepIndex: idx, field: 'resize', message: 'resize يجب أن يكون كائنًا' });
+      } else {
+        checkEntityLifecycle(idx, 'resize.entity', step.resize.entity, 'resize');
+        if (typeof step.resize.scale !== 'number' || !Number.isFinite(step.resize.scale) || step.resize.scale < 0.2 || step.resize.scale > 4) {
+          issues.push({ stepIndex: idx, field: 'resize.scale', message: 'معامل الحجم scale يجب أن يكون رقمًا بين 0.2 و 4' });
+        }
       }
     }
-    if (step.strike) {
-      if (step.strike.mode !== 'airstrike' && step.strike.mode !== 'missile') {
-        issues.push({
-          stepIndex: idx,
-          field: 'strike.mode',
-          message: 'نوع الضربة يجب أن يكون airstrike أو missile'
-        });
+
+    if (step.remove !== undefined) {
+      if (!isPlainObj(step.remove)) {
+        issues.push({ stepIndex: idx, field: 'remove', message: 'remove يجب أن يكون كائنًا' });
+      } else {
+        checkEntityLifecycle(idx, 'remove.entity', step.remove.entity, 'remove');
       }
-      if (step.strike.attacker !== undefined && !spawnedIds.has(step.strike.attacker)) {
-        issues.push({
-          stepIndex: idx,
-          field: 'strike.attacker',
-          message: `الوحدة المهاجمة "${step.strike.attacker}" غير منشأة مسبقًا`
-        });
+    }
+
+    if (step.construct !== undefined) {
+      if (!isPlainObj(step.construct)) {
+        issues.push({ stepIndex: idx, field: 'construct', message: 'construct يجب أن يكون كائنًا' });
+      } else {
+        if (step.construct.id !== undefined) {
+          if (!isValidEntityId(step.construct.id)) {
+            issues.push({ stepIndex: idx, field: 'construct.id', message: 'معرّف construct.id غير صالح (لا يقبل فراغات أو نقاط أو نصًا فارغًا)' });
+          } else if (seenCreatedIds.has(step.construct.id)) {
+            issues.push({ stepIndex: idx, field: 'construct.id', message: `معرّف المنشأة "${step.construct.id}" مكرر مع كيان آخر في السيناريو` });
+          } else {
+            seenCreatedIds.add(step.construct.id);
+          }
+        }
+        checkActor(idx, 'construct.actor', step.construct.actor);
+        checkPointRef(idx, 'construct.at', step.construct.at as PointRef | undefined);
+        if (step.construct.faction !== undefined && (typeof step.construct.faction !== 'string' || !VALID_FACTIONS.has(step.construct.faction))) {
+          issues.push({ stepIndex: idx, field: 'construct.faction', message: `فصيل غير معروف "${String(step.construct.faction)}"` });
+        }
+        if (step.construct.duration !== undefined) {
+          checkDurationField(idx, 'construct.duration', step.construct.duration, false);
+        }
+        if (step.construct.scale !== undefined && (typeof step.construct.scale !== 'number' || !Number.isFinite(step.construct.scale) || step.construct.scale < 0.2 || step.construct.scale > 4)) {
+          issues.push({ stepIndex: idx, field: 'construct.scale', message: 'معامل الحجم scale يجب أن يكون رقمًا بين 0.2 و 4' });
+        }
       }
-      if (step.strike.from !== undefined) {
-        checkPointRef(idx, 'strike.from', step.strike.from);
+    }
+
+    if (step.draw_arrow !== undefined) {
+      if (!isPlainObj(step.draw_arrow)) {
+        issues.push({ stepIndex: idx, field: 'draw_arrow', message: 'draw_arrow يجب أن يكون كائنًا' });
+      } else {
+        if (typeof step.draw_arrow.id !== 'string' || !step.draw_arrow.id.trim()) {
+          issues.push({ stepIndex: idx, field: 'draw_arrow.id', message: 'معرّف السهم draw_arrow.id مطلوب' });
+        }
+        checkPointRef(idx, 'draw_arrow.from', step.draw_arrow.from as PointRef | undefined);
+        checkPointRef(idx, 'draw_arrow.to', step.draw_arrow.to as PointRef | undefined);
+        if (step.draw_arrow.duration !== undefined) {
+          checkDurationField(idx, 'draw_arrow.duration', step.draw_arrow.duration, false);
+        }
       }
-      checkPointRef(idx, 'strike.to', step.strike.to);
+    }
+
+    if (step.zone !== undefined) {
+      if (!isPlainObj(step.zone)) {
+        issues.push({ stepIndex: idx, field: 'zone', message: 'zone يجب أن يكون كائنًا' });
+      } else {
+        if (typeof step.zone.id !== 'string' || !map.zones[step.zone.id]) {
+          const hint = typeof step.zone.id === 'string' ? closestKey(step.zone.id, zoneKeys) : null;
+          issues.push({
+            stepIndex: idx,
+            field: 'zone.id',
+            message: `منطقة غير معروفة "${String(step.zone.id ?? '')}"${hint ? ` — هل تقصد "${hint}"؟` : ''}`
+          });
+        }
+        if (step.zone.opacity !== undefined && (typeof step.zone.opacity !== 'number' || !Number.isFinite(step.zone.opacity) || step.zone.opacity < 0 || step.zone.opacity > 1)) {
+          issues.push({ stepIndex: idx, field: 'zone.opacity', message: 'zone.opacity يجب أن يكون رقمًا بين 0 و 1' });
+        }
+        if (step.zone.duration !== undefined) {
+          checkDurationField(idx, 'zone.duration', step.zone.duration, false);
+        }
+      }
+    }
+
+    if (step.callout !== undefined) {
+      if (!isPlainObj(step.callout)) {
+        issues.push({ stepIndex: idx, field: 'callout', message: 'callout يجب أن يكون كائنًا' });
+      } else {
+        if (typeof step.callout.id !== 'string' || !step.callout.id.trim()) {
+          issues.push({ stepIndex: idx, field: 'callout.id', message: 'معرّف البطاقة callout.id مطلوب' });
+        }
+        const t = step.callout.target;
+        if (typeof t !== 'string' || !t.trim()) {
+          issues.push({ stepIndex: idx, field: 'callout.target', message: 'callout.target مطلوب' });
+        } else if (!map.anchors[t]) {
+          checkEntityLifecycle(idx, 'callout.target', t, 'callout');
+        }
+        if (typeof step.callout.text !== 'string') {
+          issues.push({ stepIndex: idx, field: 'callout.text', message: 'callout.text يجب أن يكون نصًا' });
+        }
+        if (step.callout.duration !== undefined) {
+          checkDurationField(idx, 'callout.duration', step.callout.duration, false);
+        }
+      }
+    }
+
+    if (step.strike !== undefined) {
+      if (!isPlainObj(step.strike)) {
+        issues.push({ stepIndex: idx, field: 'strike', message: 'strike يجب أن يكون كائنًا' });
+      } else {
+        if (step.strike.mode !== 'airstrike' && step.strike.mode !== 'missile') {
+          issues.push({
+            stepIndex: idx,
+            field: 'strike.mode',
+            message: 'نوع الضربة يجب أن يكون airstrike أو missile'
+          });
+        }
+        if (step.strike.attacker !== undefined) {
+          checkEntityLifecycle(idx, 'strike.attacker', step.strike.attacker, 'strike_attacker');
+        }
+        if (step.strike.from !== undefined) {
+          checkPointRef(idx, 'strike.from', step.strike.from as PointRef | undefined);
+        }
+        checkPointRef(idx, 'strike.to', step.strike.to as PointRef | undefined);
+        if (step.strike.radius !== undefined && (typeof step.strike.radius !== 'number' || !Number.isFinite(step.strike.radius) || step.strike.radius <= 0 || step.strike.radius > maxRadius)) {
+          issues.push({ stepIndex: idx, field: 'strike.radius', message: `strike.radius يجب أن يكون رقمًا موجبًا ضمن 0..${maxRadius}` });
+        }
+      }
     }
   });
 
