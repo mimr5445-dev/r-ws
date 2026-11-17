@@ -293,21 +293,49 @@ export function validateScenario(
   };
 
   // Fixed-point causal reachability for `<entityId>.built` and `<entityId>.arrived`:
-  // Proves whether a motion command can genuinely execute AFTER creation, BEFORE removal,
-  // and under an achievable non-circular trigger.
+  // Distinguish carefully between:
+  //   - triggerMinSec: earliest time an event can possibly fire (lower bound; for arrived, > min motion start)
+  //   - triggerMaxSec: latest time an event is guaranteed to have fired (upper bound; Infinity for arrived!)
+  //   - triggerAncestors: triggers guaranteed to have ALREADY fired strictly before this event
+  const DT_APPROX = 1 / 30;
   const achievableBuilt = new Set<string>();
   const achievableArrived = new Set<string>();
-  const minBuiltSec = new Map<string, number>();
-  const minArrivedSec = new Map<string, number>();
+  const builtMinSec = new Map<string, number>();
+  const builtMaxSec = new Map<string, number>();
+  const arrivedMinFinishSec = new Map<string, number>();
+  const builtAncestors = new Map<string, Set<string>>();
+  const arrivedAncestors = new Map<string, Set<string>>();
 
-  const getTriggerMinTimeSec = (t: StepTrigger): number | null => {
+  const triggerEventKey = (t: StepTrigger): string | null =>
+    t.type === 'after' ? `${t.targetId}.${t.event}` : null;
+
+  const getTriggerMinSec = (t: StepTrigger): number | null => {
     if (t.type === 'at') return t.atSec;
     if (t.type === 'after') {
       return t.event === 'built'
-        ? (minBuiltSec.get(t.targetId) ?? null)
-        : (minArrivedSec.get(t.targetId) ?? null);
+        ? (builtMinSec.get(t.targetId) ?? null)
+        : (arrivedMinFinishSec.get(t.targetId) ?? null);
     }
     return null;
+  };
+
+  const getTriggerMaxSec = (t: StepTrigger): number => {
+    if (t.type === 'at') return t.atSec;
+    if (t.type === 'after') {
+      return t.event === 'built' ? (builtMaxSec.get(t.targetId) ?? Infinity) : Infinity;
+    }
+    return Infinity;
+  };
+
+  const getStepPredecessorTriggers = (t: StepTrigger): Set<string> => {
+    const out = new Set<string>();
+    if (t.type === 'after') {
+      const k = `${t.targetId}.${t.event}`;
+      out.add(k);
+      const anc = t.event === 'built' ? builtAncestors.get(t.targetId) : arrivedAncestors.get(t.targetId);
+      if (anc) for (const a of anc) out.add(a);
+    }
+    return out;
   };
 
   const isTriggerAchievable = (t: StepTrigger): boolean => {
@@ -318,35 +346,61 @@ export function validateScenario(
     return false;
   };
 
-  const canMotionExecuteAfterCreation = (m: MotionRecord, creator: CreationRecord): boolean => {
-    if (!isTriggerAchievable(m.trigger) || !isTriggerAchievable(creator.trigger)) return false;
-    // Same step: spawn runs before move and strike in StudioEngine.executeStep
-    if (m.stepIndex === creator.stepIndex) {
-      return creator.kind === 'spawn';
+  const isCreatorProvablyBeforeTrigger = (
+    creatorTrigger: StepTrigger,
+    creatorStepIdx: number,
+    creatorKind: 'spawn' | 'construct',
+    refTrigger: StepTrigger,
+    refStepIdx: number
+  ): boolean => {
+    if (!isTriggerAchievable(creatorTrigger) || !isTriggerAchievable(refTrigger)) return false;
+
+    // Same step: spawn runs before move, resize, remove, strike, callout in executeStep;
+    // construct runs after move/resize/remove (handled separately by checkEntityLifecycle).
+    if (refStepIdx === creatorStepIdx) {
+      return creatorKind === 'spawn';
     }
-    // Both on the exact same `after` trigger: step array index determines execution order
+
+    // Identical `after` trigger: step array index determines execution order
     if (
-      m.trigger.type === 'after' &&
-      creator.trigger.type === 'after' &&
-      m.trigger.targetId === creator.trigger.targetId &&
-      m.trigger.event === creator.trigger.event
+      refTrigger.type === 'after' &&
+      creatorTrigger.type === 'after' &&
+      refTrigger.targetId === creatorTrigger.targetId &&
+      refTrigger.event === creatorTrigger.event
     ) {
-      return m.stepIndex > creator.stepIndex;
+      return refStepIdx > creatorStepIdx;
     }
+
     // Both timed via `at`: strictly chronological (atSec, stepIndex)
-    if (m.trigger.type === 'at' && creator.trigger.type === 'at') {
+    if (refTrigger.type === 'at' && creatorTrigger.type === 'at') {
       return (
-        m.trigger.atSec > creator.trigger.atSec ||
-        (m.trigger.atSec === creator.trigger.atSec && m.stepIndex > creator.stepIndex)
+        refTrigger.atSec > creatorTrigger.atSec ||
+        (refTrigger.atSec === creatorTrigger.atSec && refStepIdx > creatorStepIdx)
       );
     }
-    // Timed motion with `after` creator: cannot succeed if creator's earliest trigger is strictly later
-    if (m.trigger.type === 'at' && creator.trigger.type === 'after') {
-      const cMin = getTriggerMinTimeSec(creator.trigger);
-      if (cMin !== null && m.trigger.atSec < cMin) return false;
+
+    // Causal ancestor check: creator's `after` trigger MUST have fired before ref's `after` trigger
+    const creatorKey = triggerEventKey(creatorTrigger);
+    if (creatorKey && refTrigger.type === 'after') {
+      const refPreds = getStepPredecessorTriggers(refTrigger);
+      if (refPreds.has(creatorKey)) {
+        return true;
+      }
     }
-    return true;
+
+    // Sound time-interval check: creator's guaranteed latest execution (cMax) < ref's earliest execution (rMin).
+    // Note: arrived events always have cMax === Infinity because movement duration is unknown without A*.
+    const cMax = getTriggerMaxSec(creatorTrigger);
+    const rMin = getTriggerMinSec(refTrigger);
+    if (Number.isFinite(cMax) && rMin !== null && cMax < rMin) {
+      return true;
+    }
+
+    return false;
   };
+
+  const canMotionExecuteAfterCreation = (m: MotionRecord, creator: CreationRecord): boolean =>
+    isCreatorProvablyBeforeTrigger(creator.trigger, creator.stepIndex, creator.kind, m.trigger, m.stepIndex);
 
   const isMotionBlockedByRemoval = (m: MotionRecord, removals: RemovalRecord[]): boolean => {
     for (const rem of removals) {
@@ -356,6 +410,12 @@ export function validateScenario(
     return false;
   };
 
+  const setsEqual = (a: Set<string> | undefined, b: Set<string>): boolean => {
+    if (!a || a.size !== b.size) return false;
+    for (const v of b) if (!a.has(v)) return false;
+    return true;
+  };
+
   let changed = true;
   while (changed) {
     changed = false;
@@ -363,22 +423,42 @@ export function validateScenario(
     for (const [id, creations] of creationsById) {
       const creator = creations[0];
       if (!creator || creator.kind !== 'construct') continue;
-      if (achievableBuilt.has(id)) continue;
       if (!isTriggerAchievable(creator.trigger)) continue;
       const removals = removalsById.get(id) ?? [];
-      if (removals.some((r) => r.stepIndex === creator.stepIndex && r.stepIndex >= creator.stepIndex)) continue;
-      achievableBuilt.add(id);
-      const cMin = getTriggerMinTimeSec(creator.trigger);
-      if (cMin !== null) {
-        minBuiltSec.set(id, cMin + creator.constructDurationSec);
+      if (removals.some((r) => r.stepIndex === creator.stepIndex)) continue;
+
+      const cMin = getTriggerMinSec(creator.trigger);
+      const cMax = getTriggerMaxSec(creator.trigger);
+      const nextMin = cMin !== null ? cMin + creator.constructDurationSec : null;
+      // Add 2*DT slack on max for tick quantization of buildProgress and next evaluateTimeline() tick
+      const nextMax = Number.isFinite(cMax) ? cMax + creator.constructDurationSec + DT_APPROX * 2 : Infinity;
+      const nextAnc = getStepPredecessorTriggers(creator.trigger);
+
+      if (!achievableBuilt.has(id)) {
+        achievableBuilt.add(id);
+        if (nextMin !== null) builtMinSec.set(id, nextMin);
+        builtMaxSec.set(id, nextMax);
+        builtAncestors.set(id, nextAnc);
+        changed = true;
+      } else {
+        const prevMin = builtMinSec.get(id);
+        const prevMax = builtMaxSec.get(id) ?? Infinity;
+        if (
+          (nextMin !== null && (prevMin === undefined || nextMin < prevMin)) ||
+          nextMax < prevMax ||
+          !setsEqual(builtAncestors.get(id), nextAnc)
+        ) {
+          if (nextMin !== null) builtMinSec.set(id, nextMin);
+          builtMaxSec.set(id, nextMax);
+          builtAncestors.set(id, nextAnc);
+          changed = true;
+        }
       }
-      changed = true;
     }
 
     for (const [id, creations] of creationsById) {
       const creator = creations[0];
       if (!creator || creator.kind !== 'spawn') continue;
-      if (achievableArrived.has(id)) continue;
       if (!isTriggerAchievable(creator.trigger)) continue;
 
       const actor = actors[creator.actorId];
@@ -386,27 +466,57 @@ export function validateScenario(
 
       const motions = motionsById.get(id) ?? [];
       const removals = removalsById.get(id) ?? [];
-      let bestMinTime: number | null = null;
+      let bestMinFinish: number | null = null;
+      let intersectAnc: Set<string> | null = null;
       let canArrive = false;
 
       for (const m of motions) {
         if (m.kind === 'airstrike' && actor?.kind !== 'air') continue;
-        // Self-cycle check (explicit even though least fixed point prevents it)
         if (m.trigger.type === 'after' && m.trigger.event === 'arrived' && m.trigger.targetId === id) continue;
         if (!canMotionExecuteAfterCreation(m, creator)) continue;
         if (isMotionBlockedByRemoval(m, removals)) continue;
         canArrive = true;
-        const mMin = getTriggerMinTimeSec(m.trigger);
-        if (mMin !== null && (bestMinTime === null || mMin < bestMinTime)) {
-          bestMinTime = mMin;
+        // Arrival completes strictly after motion begins (at least 1 tick later)
+        const mStartMin = getTriggerMinSec(m.trigger);
+        if (mStartMin !== null) {
+          const finishMin = mStartMin + DT_APPROX;
+          if (bestMinFinish === null || finishMin < bestMinFinish) {
+            bestMinFinish = finishMin;
+          }
+        }
+        const mPreds = getStepPredecessorTriggers(m.trigger);
+        if (intersectAnc === null) {
+          intersectAnc = mPreds;
+        } else {
+          const narrowed = new Set<string>();
+          for (const a of intersectAnc) if (mPreds.has(a)) narrowed.add(a);
+          intersectAnc = narrowed;
         }
       }
 
       if (canArrive) {
-        achievableArrived.add(id);
-        if (bestMinTime !== null) {
-          minArrivedSec.set(id, bestMinTime);
+        const finalAnc = intersectAnc ?? new Set<string>();
+        if (!achievableArrived.has(id)) {
+          achievableArrived.add(id);
+          if (bestMinFinish !== null) arrivedMinFinishSec.set(id, bestMinFinish);
+          arrivedAncestors.set(id, finalAnc);
+          changed = true;
+        } else {
+          const prevMin = arrivedMinFinishSec.get(id);
+          if (
+            (bestMinFinish !== null && (prevMin === undefined || bestMinFinish < prevMin)) ||
+            !setsEqual(arrivedAncestors.get(id), finalAnc)
+          ) {
+            if (bestMinFinish !== null) arrivedMinFinishSec.set(id, bestMinFinish);
+            arrivedAncestors.set(id, finalAnc);
+            changed = true;
+          }
         }
+      } else if (achievableArrived.has(id)) {
+        // Soundness guard: if narrowed ancestors/min-times invalidated an earlier provisional reachability, retract it
+        achievableArrived.delete(id);
+        arrivedMinFinishSec.delete(id);
+        arrivedAncestors.delete(id);
         changed = true;
       }
     }
@@ -547,14 +657,27 @@ export function validateScenario(
       }
     }
 
-    // Timed ref waiting on an `after` creator whose dependency cannot arrive before `refTrigger.atSec`.
+    // Timed ref waiting on an `after` creator whose completion cannot be proven before `refTrigger.atSec`.
     if (refTrigger.type === 'at' && creator.trigger.type === 'after') {
-      const depCreator = creationsById.get(creator.trigger.targetId)?.[0];
-      if (depCreator?.trigger.type === 'at' && depCreator.trigger.atSec > refTrigger.atSec) {
+      const cMax = getTriggerMaxSec(creator.trigger);
+      if (!Number.isFinite(cMax) || cMax >= refTrigger.atSec) {
         issues.push({
           stepIndex: stepIdx,
           field,
-          message: `الوحدة "${targetId}" تعتمد في إنشائها على "${creator.trigger.targetId}" الذي يُنشأ بعد ت=${refTrigger.atSec}s`
+          message: `الوحدة "${targetId}" تُنشأ بعد محفز "${creator.trigger.targetId}.${creator.trigger.event}" ولا يمكن إثبات اكتمال إنشائها قبل ت=${refTrigger.atSec}s`
+        });
+        return;
+      }
+    }
+
+    // Conditional ref (`after`) using an entity whose creation is not provably before `refTrigger`.
+    if (op !== 'after' && refTrigger.type === 'after' && isTriggerAchievable(refTrigger)) {
+      const sameEntityEvent = refTrigger.targetId === targetId;
+      if (!sameEntityEvent && !isCreatorProvablyBeforeTrigger(creator.trigger, creator.stepIndex, creator.kind, refTrigger, stepIdx)) {
+        issues.push({
+          stepIndex: stepIdx,
+          field,
+          message: `لا يمكن إثبات إنشاء الوحدة "${targetId}" قبل تنفيذ المحفز "${refTrigger.targetId}.${refTrigger.event}"`
         });
         return;
       }

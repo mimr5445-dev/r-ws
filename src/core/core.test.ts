@@ -969,6 +969,126 @@ test('TASK 0.2.2: causal reachability of after: entity.arrived handles ordering,
   assert.ok(validateScenario(groundUnitAirstrike, map, DEMO_ACTORS).some((i) => i.stepIndex === 2 && i.field === 'after'));
 });
 
+test('TASK 0.2.3: cross-branch trigger causality distinguishes min/max bounds, ancestors, and indeterminate arrival order', () => {
+  const map = DEMO_MAPS.geopolitics_strait;
+
+  // 1. Independent faster branch (`base.built`) cannot execute motion on entity created `after: scout.arrived`
+  const independentFasterMoveAfterArrivedCreate: ScenarioFile = {
+    meta: { title: 'independent branch move after arrived create', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 'scout', actor: 'naval_corvette', at: 'port_south' }] },
+      { at: '0s', move: { entity: 'scout', to: 'strait_gate' } },
+      { at: '0s', construct: { id: 'base', actor: 'military_base', at: 'capital_north', duration: '1s' } },
+      { after: 'scout.arrived', spawn: [{ id: 'unit', actor: 'heavy_tank', at: 'capital_north' }] },
+      { after: 'base.built', move: { entity: 'unit', to: 'peninsula_center' } },
+      { after: 'unit.arrived', caption: { text: 'unprovable cross-branch order' } }
+    ]
+  };
+  const issues1 = validateScenario(independentFasterMoveAfterArrivedCreate, map, DEMO_ACTORS);
+  assert.ok(issues1.some((i) => i.stepIndex === 4 && i.field === 'move.entity'));
+  assert.ok(issues1.some((i) => i.stepIndex === 5 && i.field === 'after'));
+
+  // 2a. Inverse provable case (time-interval): `base.built` max (~1.067s) < `scout.arrived` min (> 3s)
+  const provableIntervalCrossBranch: ScenarioFile = {
+    meta: { title: 'provable time-interval cross-branch', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 'scout', actor: 'naval_corvette', at: 'port_south' }] },
+      { at: '0s', construct: { id: 'base', actor: 'military_base', at: 'capital_north', duration: '1s' } },
+      { after: 'base.built', spawn: [{ id: 'unit', actor: 'heavy_tank', at: 'capital_north' }] },
+      { at: '3s', move: { entity: 'scout', to: 'strait_gate' } },
+      { after: 'scout.arrived', move: { entity: 'unit', to: 'peninsula_center' } },
+      { after: 'unit.arrived', caption: { text: 'provable interval cross-branch ok' } }
+    ]
+  };
+  assert.deepEqual(validateScenario(provableIntervalCrossBranch, map, DEMO_ACTORS), []);
+
+  // 2b. Inverse provable case (causal ancestor): `scout` itself moves `after: base.built`
+  const provableAncestorCrossBranch: ScenarioFile = {
+    meta: { title: 'provable causal-ancestor cross-branch', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 'scout', actor: 'naval_corvette', at: 'port_south' }] },
+      { at: '0s', construct: { id: 'base', actor: 'military_base', at: 'capital_north', duration: '1s' } },
+      { after: 'base.built', spawn: [{ id: 'unit', actor: 'heavy_tank', at: 'capital_north' }] },
+      { after: 'base.built', move: { entity: 'scout', to: 'strait_gate' } },
+      { after: 'scout.arrived', move: { entity: 'unit', to: 'peninsula_center' } },
+      { after: 'unit.arrived', caption: { text: 'provable ancestor cross-branch ok' } }
+    ]
+  };
+  assert.deepEqual(validateScenario(provableAncestorCrossBranch, map, DEMO_ACTORS), []);
+
+  // 3. Timed `at` move on an entity created `after: scout.arrived` must be rejected (arrived completion has no finite upper bound)
+  const timedMoveOnArrivedCreatedEntity: ScenarioFile = {
+    meta: { title: 'timed move on arrived-created unit', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 'scout', actor: 'naval_corvette', at: 'port_south' }] },
+      { at: '0s', move: { entity: 'scout', to: 'strait_gate' } },
+      { after: 'scout.arrived', spawn: [{ id: 'unit', actor: 'heavy_tank', at: 'capital_north' }] },
+      { at: '5s', move: { entity: 'unit', to: 'peninsula_center' } },
+      { after: 'unit.arrived', caption: { text: 'unbounded arrived upper bound' } }
+    ]
+  };
+  const issues3 = validateScenario(timedMoveOnArrivedCreatedEntity, map, DEMO_ACTORS);
+  assert.ok(issues3.some((i) => i.stepIndex === 3 && i.field === 'move.entity'));
+  assert.ok(issues3.some((i) => i.stepIndex === 4 && i.field === 'after'));
+
+  // 4. Multi-level (3-level) conditional causal chain in valid order must be accepted
+  const threeLevelCausalChain: ScenarioFile = {
+    meta: { title: '3-level conditional causal chain', map: 'geopolitics_strait' },
+    timeline: [
+      {
+        at: '0s',
+        spawn: [
+          { id: 'u1', actor: 'naval_corvette', at: 'port_south' },
+          { id: 'u2', actor: 'destroyer_ship', at: 'port_south' }
+        ],
+        construct: { id: 'base', actor: 'military_base', at: 'capital_north', duration: '1s' }
+      },
+      { after: 'base.built', move: { entity: 'u1', to: 'strait_gate' } },
+      { after: 'u1.arrived', move: { entity: 'u2', to: 'port_east' } },
+      { after: 'u2.arrived', caption: { text: 'اكتملت السلسلة الشرطية ثلاثية المستويات' } }
+    ]
+  };
+  assert.deepEqual(validateScenario(threeLevelCausalChain, map, DEMO_ACTORS), []);
+
+  // 5a. 3-node cross-branch circular dependency must reject all dependent steps
+  const threeNodeCrossBranchCycle: ScenarioFile = {
+    meta: { title: '3-node cross-branch cycle', map: 'geopolitics_strait' },
+    timeline: [
+      {
+        at: '0s',
+        spawn: [
+          { id: 'a', actor: 'heavy_tank', at: 'capital_north' },
+          { id: 'b', actor: 'heavy_tank', at: 'coast_point_1' },
+          { id: 'c', actor: 'heavy_tank', at: 'peninsula_center' }
+        ]
+      },
+      { after: 'a.arrived', move: { entity: 'b', to: 'peninsula_center' } },
+      { after: 'b.arrived', move: { entity: 'c', to: 'capital_north' } },
+      { after: 'c.arrived', move: { entity: 'a', to: 'coast_point_1' } }
+    ]
+  };
+  const issues5a = validateScenario(threeNodeCrossBranchCycle, map, DEMO_ACTORS);
+  assert.ok(issues5a.some((i) => i.stepIndex === 1 && i.field === 'after'));
+  assert.ok(issues5a.some((i) => i.stepIndex === 2 && i.field === 'after'));
+  assert.ok(issues5a.some((i) => i.stepIndex === 3 && i.field === 'after'));
+
+  // 5b. Impossible cross-branch timing (`slow_base` 5s spawns `unit`, `fast_base` 1s moves `unit`) must be rejected
+  const impossibleCrossBranchTiming: ScenarioFile = {
+    meta: { title: 'impossible cross-branch built timing', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', construct: { id: 'slow_base', actor: 'military_base', at: 'capital_north', duration: '5s' } },
+      { at: '0s', construct: { id: 'fast_base', actor: 'radar_outpost', at: 'coast_point_1', duration: '1s' } },
+      { after: 'slow_base.built', spawn: [{ id: 'unit', actor: 'heavy_tank', at: 'capital_north' }] },
+      { after: 'fast_base.built', move: { entity: 'unit', to: 'peninsula_center' } },
+      { after: 'unit.arrived', caption: { text: 'impossible before slow_base' } }
+    ]
+  };
+  const issues5b = validateScenario(impossibleCrossBranchTiming, map, DEMO_ACTORS);
+  assert.ok(issues5b.some((i) => i.stepIndex === 3 && i.field === 'move.entity'));
+  assert.ok(issues5b.some((i) => i.stepIndex === 4 && i.field === 'after'));
+});
+
+
 
 
 
