@@ -633,6 +633,196 @@ test('P0 Hardening: strict timing, at+after conflict, map bounds, and numeric li
   assert.equal(engine.caption, '');
 });
 
+test('TASK 0.2.1: anonymous construct reserves future explicit IDs and stays deterministic across reset/seekToTick', () => {
+  const scenario: ScenarioFile = {
+    meta: { title: 'auto construct id reservation', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', construct: { actor: 'radar_outpost', at: 'capital_north', faction: 'blue', duration: '1s' } },
+      { at: '0.5s', construct: { actor: 'supply_depot', at: 'coast_point_1', faction: 'blue', duration: '1s' } },
+      { at: '1s', spawn: [{ id: 'bld_1', actor: 'heavy_tank', at: 'capital_north', faction: 'blue' }] },
+      { after: 'bld_1.arrived', construct: { id: 'bld_3', actor: 'military_base', at: 'peninsula_center', faction: 'blue', duration: '1s' } },
+      { at: '1.2s', move: { entity: 'bld_1', to: 'peninsula_center' } }
+    ]
+  };
+
+  assert.deepEqual(validateScenario(scenario, DEMO_MAPS.geopolitics_strait, DEMO_ACTORS), []);
+
+  const engine = new StudioEngine(DEMO_MAPS.geopolitics_strait, DEMO_ACTORS, scenario);
+  for (let i = 0; i < 40; i++) engine.step();
+
+  // First anonymous construct MUST skip reserved 'bld_1' and get 'bld_2'
+  assert.ok(engine.entities.has('bld_2'), 'first anonymous construct should skip reserved bld_1 and receive bld_2');
+  // Second anonymous construct MUST skip reserved 'bld_3' and get 'bld_4'
+  assert.ok(engine.entities.has('bld_4'), 'second anonymous construct should skip reserved bld_3 and receive bld_4');
+  // Explicit bld_1 must be the spawned heavy_tank without collision
+  assert.equal(engine.entities.get('bld_1')?.actorId, 'heavy_tank');
+
+  // Verify deterministic IDs on seekToTick and full reset/restart
+  const snapshotRun1 = [...engine.entities.keys()].sort();
+  engine.seekToTick(10);
+  engine.seekToTick(40);
+  assert.deepEqual([...engine.entities.keys()].sort(), snapshotRun1);
+
+  engine.reset();
+  for (let i = 0; i < 40; i++) engine.step();
+  assert.deepEqual([...engine.entities.keys()].sort(), snapshotRun1);
+
+  // Also test multiple anonymous constructs with no explicit bld_* IDs
+  const multiAnon: ScenarioFile = {
+    meta: { title: 'multi anon', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', construct: { actor: 'radar_outpost', at: 'capital_north', duration: '1s' } },
+      { at: '0.5s', construct: { actor: 'supply_depot', at: 'coast_point_1', duration: '1s' } },
+      { at: '1s', construct: { actor: 'military_base', at: 'peninsula_center', duration: '1s' } }
+    ]
+  };
+  const eng2 = new StudioEngine(DEMO_MAPS.geopolitics_strait, DEMO_ACTORS, multiAnon);
+  eng2.seekToTick(45);
+  assert.deepEqual([...eng2.entities.keys()].sort(), ['bld_1', 'bld_2', 'bld_3']);
+  eng2.reset();
+  eng2.seekToTick(45);
+  assert.deepEqual([...eng2.entities.keys()].sort(), ['bld_1', 'bld_2', 'bld_3']);
+});
+
+test('TASK 0.2.1: .built trigger fires once upon construct completion while .arrived rejects static units and fires once on arrival', () => {
+  // 1. Construct then after: <id>.built fires ONLY after build completes, once, and deterministically on reset/seekToTick
+  const buildScenario: ScenarioFile = {
+    meta: { title: 'construct built trigger', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', construct: { id: 'radar_1', actor: 'radar_outpost', at: 'capital_north', faction: 'blue', duration: '2s' } },
+      { after: 'radar_1.built', sound: 'alert_ping', caption: { text: 'الرادار مكتمل' }, pulse: { at: 'capital_north', radius: 60 } }
+    ]
+  };
+  assert.deepEqual(validateScenario(buildScenario, DEMO_MAPS.geopolitics_strait, DEMO_ACTORS), []);
+
+  const eng = new StudioEngine(DEMO_MAPS.geopolitics_strait, DEMO_ACTORS, buildScenario);
+  let alertCount = 0;
+  eng.onSound((s) => {
+    if (s === 'alert_ping') alertCount++;
+  });
+
+  // Before 2s completion (tick 58 ~ 1.93s): must NOT trigger prematurely
+  for (let i = 0; i < 58; i++) eng.step();
+  assert.equal(eng.caption, '', 'after: radar_1.built must NOT fire before construction completes');
+  assert.equal(alertCount, 0);
+
+  // Advance past 2s completion: must fire exactly once
+  for (let i = 0; i < 15; i++) eng.step();
+  assert.equal(eng.caption, 'الرادار مكتمل');
+  assert.equal(alertCount, 1, 'after: radar_1.built must fire exactly once');
+  assert.ok((eng.entities.get('radar_1')?.builtTick ?? 0) > 0);
+
+  // Continue advancing: must NOT re-trigger
+  for (let i = 0; i < 60; i++) eng.step();
+  assert.equal(alertCount, 1, 'after: radar_1.built must never repeat');
+
+  // Verify seekToTick & reset match exact state
+  eng.seekToTick(58);
+  assert.equal(eng.caption, '');
+  eng.seekToTick(73);
+  assert.equal(eng.caption, 'الرادار مكتمل');
+  eng.reset();
+  eng.seekToTick(73);
+  assert.equal(eng.caption, 'الرادار مكتمل');
+
+  // 2. Reject impossible triggers by creation kind / actor capability
+  const constructWithArrived: ScenarioFile = {
+    meta: { title: 'bad construct arrived', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', construct: { id: 'r1', actor: 'radar_outpost', at: 'capital_north', duration: '1s' } },
+      { after: 'r1.arrived', caption: { text: 'bad' } }
+    ]
+  };
+  assert.ok(validateScenario(constructWithArrived, DEMO_MAPS.geopolitics_strait, DEMO_ACTORS).some((i) => i.field === 'after'));
+
+  const staticSpawnWithArrived: ScenarioFile = {
+    meta: { title: 'bad static spawn arrived', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 'base_static', actor: 'military_base', at: 'capital_north' }] },
+      { after: 'base_static.arrived', caption: { text: 'impossible move' } }
+    ]
+  };
+  assert.ok(validateScenario(staticSpawnWithArrived, DEMO_MAPS.geopolitics_strait, DEMO_ACTORS).some((i) => i.field === 'after'));
+
+  const spawnWithBuilt: ScenarioFile = {
+    meta: { title: 'bad spawn built', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 't1', actor: 'heavy_tank', at: 'capital_north' }] },
+      { after: 't1.built', caption: { text: 'not constructed' } }
+    ]
+  };
+  assert.ok(validateScenario(spawnWithBuilt, DEMO_MAPS.geopolitics_strait, DEMO_ACTORS).some((i) => i.field === 'after'));
+
+  const movableWithoutMove: ScenarioFile = {
+    meta: { title: 'movable without move', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 't1', actor: 'heavy_tank', at: 'capital_north' }] },
+      { after: 't1.arrived', caption: { text: 'never ordered to move' } }
+    ]
+  };
+  assert.ok(validateScenario(movableWithoutMove, DEMO_MAPS.geopolitics_strait, DEMO_ACTORS).some((i) => i.field === 'after'));
+
+  // 3. Movable unit spawn -> move -> after: <id>.arrived executes cleanly once
+  const moveScenario: ScenarioFile = {
+    meta: { title: 'movable arrived once', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 'ship_1', actor: 'naval_corvette', at: 'port_south', faction: 'blue' }] },
+      { at: '0.1s', move: { entity: 'ship_1', to: 'strait_gate' } },
+      { after: 'ship_1.arrived', sound: 'alert_ping', caption: { text: 'وصلت الدورية' } }
+    ]
+  };
+  assert.deepEqual(validateScenario(moveScenario, DEMO_MAPS.geopolitics_strait, DEMO_ACTORS), []);
+  const shipEng = new StudioEngine(DEMO_MAPS.geopolitics_strait, DEMO_ACTORS, moveScenario);
+  let arrivedAlerts = 0;
+  shipEng.onSound((s) => {
+    if (s === 'alert_ping') arrivedAlerts++;
+  });
+  for (let i = 0; i < 400; i++) shipEng.step();
+  assert.equal(shipEng.caption, 'وصلت الدورية');
+  assert.equal(arrivedAlerts, 1, 'after: ship_1.arrived must fire exactly once');
+});
+
+test('TASK 0.2.1: seekToTick restores previous silent state via try/finally when an exception occurs', () => {
+  const faultyMap = {
+    ...DEMO_MAPS.geopolitics_strait,
+    navGrid: [...DEMO_MAPS.geopolitics_strait.navGrid]
+  };
+  const scenario: ScenarioFile = {
+    meta: { title: 'seek exception test', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 'ship_1', actor: 'naval_corvette', at: 'port_south' }] },
+      { at: '0.2s', move: { entity: 'ship_1', to: 'strait_gate' } },
+      { at: '1s', sound: 'alert_ping' }
+    ]
+  };
+  const engine = new StudioEngine(faultyMap, DEMO_ACTORS, scenario);
+  const heard: string[] = [];
+  engine.onSound((s) => heard.push(s));
+
+  // Inject a deliberate throw when step() hits tick 6 (0.2s move -> isWorldPointWalkable / findPath reads anchors or navGrid)
+  const origNavGrid = faultyMap.navGrid;
+  Object.defineProperty(faultyMap, 'navGrid', {
+    configurable: true,
+    get() {
+      if (engine.tick === 6) {
+        throw new Error('simulated pathfinding failure');
+      }
+      return origNavGrid;
+    }
+  });
+
+  assert.throws(() => engine.seekToTick(15), /simulated pathfinding failure/);
+
+  // Restore navGrid and verify silent was restored to false (future step at tick 30 still emits alert_ping)
+  Object.defineProperty(faultyMap, 'navGrid', {
+    configurable: true,
+    value: origNavGrid
+  });
+  while (engine.tick < 35) engine.step();
+  assert.ok(heard.includes('alert_ping'), 'silent flag must be restored to false in finally block after seekToTick throws');
+});
+
+
 
 
 

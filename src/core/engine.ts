@@ -78,6 +78,9 @@ export class StudioEngine {
   private soundListeners: Array<(id: SoundId) => void> = [];
   private blockedListeners: Array<(entity: EntityState) => void> = [];
   private autoCounter = 0;
+  private constructAutoSeq = 0;
+  private reservedExplicitIds = new Set<string>();
+  private usedAutoIds = new Set<string>();
   private silent = false;
 
   constructor(
@@ -130,10 +133,33 @@ export class StudioEngine {
 
   seekToTick(targetTick: number): void {
     const clamped = Math.max(0, Math.floor(targetTick));
-    if (clamped < this.tick) this.reset();
+    const prevSilent = this.silent;
     this.silent = true;
-    while (this.tick < clamped) this.step();
-    this.silent = false;
+    try {
+      if (clamped < this.tick) this.reset();
+      while (this.tick < clamped) this.step();
+    } finally {
+      this.silent = prevSilent;
+    }
+  }
+
+  private collectReservedExplicitIds(): Set<string> {
+    const reserved = new Set<string>();
+    const steps = Array.isArray(this.scenario.timeline) ? this.scenario.timeline : [];
+    for (const st of steps) {
+      if (!st || typeof st !== 'object') continue;
+      if (Array.isArray(st.spawn)) {
+        for (const s of st.spawn) {
+          if (s && typeof s.id === 'string' && s.id.trim()) {
+            reserved.add(s.id.trim());
+          }
+        }
+      }
+      if (st.construct && typeof st.construct.id === 'string' && st.construct.id.trim()) {
+        reserved.add(st.construct.id.trim());
+      }
+    }
+    return reserved;
   }
 
   reset(): void {
@@ -151,6 +177,9 @@ export class StudioEngine {
     this.caption = '';
     this.cameraTarget = { x: this.map.width / 2, y: this.map.height / 2, zoom: 1, durationSec: 0, seq: 0 };
     this.autoCounter = 0;
+    this.constructAutoSeq = 0;
+    this.usedAutoIds.clear();
+    this.reservedExplicitIds = this.collectReservedExplicitIds();
     for (const z of Object.values(this.map.zones)) {
       this.zones.set(z.id, { id: z.id, color: '#3b82f6', targetOpacity: 0, opacity: 0, rate: 0 });
     }
@@ -238,7 +267,11 @@ export class StudioEngine {
 
       if (e.buildProgress < 1) {
         e.buildProgress = Math.min(1, e.buildProgress + e.buildRate * DT);
-        if (e.buildProgress === 1) this.emitSound('build_complete');
+        if (e.buildProgress >= 1) {
+          e.buildProgress = 1;
+          e.builtTick = this.tick;
+          this.emitSound('build_complete');
+        }
         continue;
       }
 
@@ -484,6 +517,8 @@ export class StudioEngine {
         const ent = entityId ? this.entities.get(entityId) : undefined;
         if (event === 'arrived' && ent && ent.arrivedTick !== null && !ent.isMoving) {
           ready = true;
+        } else if (event === 'built' && ent && ent.builtTick !== null && ent.buildProgress >= 1) {
+          ready = true;
         }
       }
 
@@ -544,10 +579,15 @@ export class StudioEngine {
       const pt = resolvePoint(this.map, st.construct.at);
       if (pt) {
         let constructId = st.construct.id;
-        if (!constructId) {
+        if (constructId === undefined) {
           do {
-            constructId = `bld_${++this.autoCounter}`;
-          } while (this.entities.has(constructId));
+            constructId = `bld_${++this.constructAutoSeq}`;
+          } while (
+            this.reservedExplicitIds.has(constructId) ||
+            this.entities.has(constructId) ||
+            this.usedAutoIds.has(constructId)
+          );
+          this.usedAutoIds.add(constructId);
         }
         this.dispatchOrder({
           type: 'construct',
@@ -662,6 +702,7 @@ export class StudioEngine {
           buildRate: 1,
           isMoving: false,
           arrivedTick: null,
+          builtTick: null,
           homeX: ord.at.x,
           homeY: ord.at.y,
           pendingStrike: null
@@ -697,6 +738,7 @@ export class StudioEngine {
           buildRate: 1 / Math.max(0.2, ord.durationSec),
           isMoving: false,
           arrivedTick: null,
+          builtTick: null,
           homeX: ord.at.x,
           homeY: ord.at.y,
           pendingStrike: null

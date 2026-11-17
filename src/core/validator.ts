@@ -28,20 +28,23 @@ const VALID_SOUNDS = new Set([
   'ship_horn'
 ]);
 const VALID_ENTITY_ID_RE = /^[^\s.]+$/;
-const AFTER_TRIGGER_RE = /^([^\s.]+)\.arrived$/;
+type AfterEvent = 'arrived' | 'built';
+const AFTER_TRIGGER_RE = /^([^\s.]+)\.(arrived|built)$/;
 
 const isPlainObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
 type StepTrigger =
   | { type: 'at'; atSec: number }
-  | { type: 'after'; targetId: string }
+  | { type: 'after'; targetId: string; event: AfterEvent }
   | { type: 'invalid' };
 
 interface CreationRecord {
   id: string;
   stepIndex: number;
   kind: 'spawn' | 'construct';
+  actorId: string;
+  constructDurationSec: number;
   trigger: StepTrigger;
 }
 
@@ -60,7 +63,7 @@ function parseStepTrigger(step: ScenarioStep): StepTrigger {
   }
   if (hasAfter && !hasAt && typeof step.after === 'string') {
     const m = AFTER_TRIGGER_RE.exec(step.after);
-    if (m) return { type: 'after', targetId: m[1] };
+    if (m) return { type: 'after', targetId: m[1], event: m[2] as AfterEvent };
   }
   return { type: 'invalid' };
 }
@@ -109,6 +112,8 @@ export function validateScenario(
   const creationsById = new Map<string, CreationRecord[]>();
   const removalsById = new Map<string, RemovalRecord[]>();
   const earliestAtMoveById = new Map<string, number>();
+  const hasIndependentMotionById = new Set<string>();
+  const airStrikeAttackerIds = new Set<string>();
 
   timeline.forEach((rawStep, idx) => {
     if (!isPlainObj(rawStep)) {
@@ -123,14 +128,29 @@ export function validateScenario(
       for (const s of step.spawn) {
         if (isPlainObj(s) && isValidEntityId(s.id)) {
           const list = creationsById.get(s.id) ?? [];
-          list.push({ id: s.id, stepIndex: idx, kind: 'spawn', trigger });
+          list.push({
+            id: s.id,
+            stepIndex: idx,
+            kind: 'spawn',
+            actorId: typeof s.actor === 'string' ? s.actor : '',
+            constructDurationSec: 0,
+            trigger
+          });
           creationsById.set(s.id, list);
         }
       }
     }
     if (isPlainObj(step.construct) && isValidEntityId(step.construct.id)) {
+      const dur = parseStrictSec(step.construct.duration);
       const list = creationsById.get(step.construct.id) ?? [];
-      list.push({ id: step.construct.id, stepIndex: idx, kind: 'construct', trigger });
+      list.push({
+        id: step.construct.id,
+        stepIndex: idx,
+        kind: 'construct',
+        actorId: typeof step.construct.actor === 'string' ? step.construct.actor : '',
+        constructDurationSec: Math.max(0.2, dur ?? 2),
+        trigger
+      });
       creationsById.set(step.construct.id, list);
     }
     if (isPlainObj(step.remove) && isValidEntityId(step.remove.entity)) {
@@ -138,10 +158,20 @@ export function validateScenario(
       list.push({ id: step.remove.entity, stepIndex: idx, trigger });
       removalsById.set(step.remove.entity, list);
     }
-    if (isPlainObj(step.move) && isValidEntityId(step.move.entity) && trigger.type === 'at') {
-      const prev = earliestAtMoveById.get(step.move.entity);
-      if (prev === undefined || trigger.atSec < prev) {
-        earliestAtMoveById.set(step.move.entity, trigger.atSec);
+    if (isPlainObj(step.move) && isValidEntityId(step.move.entity)) {
+      if (!(trigger.type === 'after' && trigger.event === 'arrived' && trigger.targetId === step.move.entity)) {
+        hasIndependentMotionById.add(step.move.entity);
+      }
+      if (trigger.type === 'at') {
+        const prev = earliestAtMoveById.get(step.move.entity);
+        if (prev === undefined || trigger.atSec < prev) {
+          earliestAtMoveById.set(step.move.entity, trigger.atSec);
+        }
+      }
+    }
+    if (isPlainObj(step.strike) && step.strike.mode === 'airstrike' && isValidEntityId(step.strike.attacker)) {
+      if (!(trigger.type === 'after' && trigger.event === 'arrived' && trigger.targetId === step.strike.attacker)) {
+        airStrikeAttackerIds.add(step.strike.attacker);
       }
     }
   });
@@ -231,18 +261,24 @@ export function validateScenario(
     if (refTrigger.type === 'at' && rem.trigger.type === 'at') {
       return refTrigger.atSec > rem.trigger.atSec || (refTrigger.atSec === rem.trigger.atSec && refIdx > rem.stepIndex);
     }
-    if (refTrigger.type === 'after' && rem.trigger.type === 'after' && refTrigger.targetId === rem.trigger.targetId) {
+    if (refTrigger.type === 'after' && rem.trigger.type === 'after' && refTrigger.targetId === rem.trigger.targetId && refTrigger.event === rem.trigger.event) {
       return refIdx > rem.stepIndex;
     }
-    // Cross-branch: if ref waits on `after: X.arrived`, check whether X can only be created or moved after `rem`
+    // Cross-branch: if ref waits on `after: X.<event>`, check whether X can only finish after `rem`
     if (refTrigger.type === 'after' && rem.trigger.type === 'at') {
       const depCreator = creationsById.get(refTrigger.targetId)?.[0];
       if (depCreator?.trigger.type === 'at' && depCreator.trigger.atSec > rem.trigger.atSec) {
         return true;
       }
-      const depMove = earliestAtMoveById.get(refTrigger.targetId);
-      if (depCreator?.trigger.type === 'at' && depMove !== undefined && depMove >= rem.trigger.atSec) {
-        return true;
+      if (refTrigger.event === 'arrived') {
+        const depMove = earliestAtMoveById.get(refTrigger.targetId);
+        if (depCreator?.trigger.type === 'at' && depMove !== undefined && depMove >= rem.trigger.atSec) {
+          return true;
+        }
+      } else if (refTrigger.event === 'built' && depCreator?.trigger.type === 'at') {
+        if (depCreator.trigger.atSec + depCreator.constructDurationSec >= rem.trigger.atSec) {
+          return true;
+        }
       }
     }
     // Otherwise (cross-branch timed vs conditional whose wall-clock order depends on A*/speed),
@@ -254,7 +290,8 @@ export function validateScenario(
     stepIdx: number,
     field: string,
     targetId: unknown,
-    op: 'after' | 'move' | 'resize' | 'remove' | 'callout' | 'strike_attacker'
+    op: 'after' | 'move' | 'resize' | 'remove' | 'callout' | 'strike_attacker',
+    afterEvent?: AfterEvent
   ) => {
     if (!isValidEntityId(targetId)) {
       issues.push({
@@ -279,7 +316,7 @@ export function validateScenario(
         issues.push({
           stepIndex: stepIdx,
           field: 'after',
-          message: `محفز after "${targetId}.arrived" يشير إلى وحدة غير منشأة في السيناريو`
+          message: `محفز after "${targetId}.${afterEvent ?? 'arrived'}" يشير إلى وحدة غير منشأة في السيناريو`
         });
       } else {
         issues.push({
@@ -298,7 +335,7 @@ export function validateScenario(
       issues.push({
         stepIndex: stepIdx,
         field: 'after',
-        message: `الخطوة لا يمكنها انتظار arrived للوحدة "${targetId}" التي تُنشأ في نفس الخطوة`
+        message: `الخطوة لا يمكنها انتظار ${afterEvent ?? 'arrived'} للوحدة "${targetId}" التي تُنشأ في نفس الخطوة`
       });
       return;
     }
@@ -310,6 +347,49 @@ export function validateScenario(
         message: `دورة اعتماد شرطية (after cycle) تمنع إنشاء الوحدة "${targetId}"`
       });
       return;
+    }
+
+    if (op === 'after') {
+      const actor = actors[creator.actorId];
+      if (afterEvent === 'built') {
+        if (creator.kind !== 'construct') {
+          issues.push({
+            stepIndex: stepIdx,
+            field: 'after',
+            message: `محفز "${targetId}.built" صالح فقط للمنشآت التي تُنشأ بأمر construct`
+          });
+          return;
+        }
+      } else {
+        // `.arrived` is strictly for movable units with an achievable motion command.
+        if (creator.kind === 'construct') {
+          issues.push({
+            stepIndex: stepIdx,
+            field: 'after',
+            message: `المنشأة "${targetId}" ثابتة ولا تتحرك؛ استخدم "${targetId}.built" لاكتمال البناء بدلاً من ".arrived"`
+          });
+          return;
+        }
+        if (actor && (actor.kind === 'building' || actor.speed <= 0)) {
+          issues.push({
+            stepIndex: stepIdx,
+            field: 'after',
+            message: `الوحدة الثابتة "${targetId}" (${actor.kind}) لا يمكنها الحركة ولا تحقيق محفز arrived`
+          });
+          return;
+        }
+        const canMove =
+          hasIndependentMotionById.has(targetId) ||
+          (actor?.kind === 'air' && airStrikeAttackerIds.has(targetId));
+        if (!canMove) {
+          issues.push({
+            stepIndex: stepIdx,
+            field: 'after',
+            message: `الوحدة "${targetId}" لا تملك أمر move لتحقيق محفز arrived`
+          });
+          return;
+        }
+      }
     }
 
     // Creation causality: in executeStep, construct runs AFTER move/resize/remove.
@@ -408,10 +488,10 @@ export function validateScenario(
         issues.push({
           stepIndex: idx,
           field: 'after',
-          message: `محفز after "${String(step.after)}" يجب أن يكون بصيغة "<entityId>.arrived"`
+          message: `محفز after "${String(step.after)}" يجب أن يكون بصيغة "<entityId>.arrived" أو "<entityId>.built"`
         });
       } else {
-        checkEntityLifecycle(idx, 'after', m[1], 'after');
+        checkEntityLifecycle(idx, 'after', m[1], 'after', m[2] as AfterEvent);
       }
     }
 

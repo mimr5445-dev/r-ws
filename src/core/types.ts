@@ -81,7 +81,7 @@ export interface PackBundle {
 export interface ScenarioStep {
   id?: string;
   at?: string;
-  after?: string; // "<entityId>.arrived"
+  after?: string; // "<entityId>.arrived" | "<entityId>.built"
   camera?: { focus: PointRef; zoom?: number; duration?: string };
   caption?: { text: string };
   sound?: SoundId;
@@ -144,6 +144,7 @@ export interface EntityState {
   buildRate: number;
   isMoving: boolean;
   arrivedTick: number | null;
+  builtTick: number | null;
   homeX: number;
   homeY: number;
   pendingStrike: {
