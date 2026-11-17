@@ -822,6 +822,154 @@ test('TASK 0.2.1: seekToTick restores previous silent state via try/finally when
   assert.ok(heard.includes('alert_ping'), 'silent flag must be restored to false in finally block after seekToTick throws');
 });
 
+test('TASK 0.2.2: causal reachability of after: entity.arrived handles ordering, cycles, independent triggers, built, and airstrikes', () => {
+  const map = DEMO_MAPS.geopolitics_strait;
+
+  // 1. move before spawn (same `at` earlier stepIndex): must reject arrived
+  const moveBeforeSpawnSameAt: ScenarioFile = {
+    meta: { title: 'move before spawn same at', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', move: { entity: 't1', to: 'peninsula_center' } },
+      { at: '0s', spawn: [{ id: 't1', actor: 'heavy_tank', at: 'capital_north' }] },
+      { after: 't1.arrived', caption: { text: 'should reject' } }
+    ]
+  };
+  const issues1 = validateScenario(moveBeforeSpawnSameAt, map, DEMO_ACTORS);
+  assert.ok(issues1.some((i) => i.stepIndex === 2 && i.field === 'after'));
+
+  // 2. spawn then move (same step and later step): must accept arrived
+  const spawnThenMoveSameStep: ScenarioFile = {
+    meta: { title: 'spawn then move same step', map: 'geopolitics_strait' },
+    timeline: [
+      {
+        at: '0s',
+        spawn: [{ id: 't1', actor: 'heavy_tank', at: 'capital_north' }],
+        move: { entity: 't1', to: 'peninsula_center' }
+      },
+      { after: 't1.arrived', caption: { text: 'arrived cleanly' } }
+    ]
+  };
+  assert.deepEqual(validateScenario(spawnThenMoveSameStep, map, DEMO_ACTORS), []);
+
+  // 3. spawn at later time (5s) then move before it (2s): must reject scenario (including `after`)
+  const lateSpawnEarlyMove: ScenarioFile = {
+    meta: { title: 'late spawn early move', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '5s', spawn: [{ id: 't1', actor: 'heavy_tank', at: 'capital_north' }] },
+      { at: '2s', move: { entity: 't1', to: 'peninsula_center' } },
+      { after: 't1.arrived', caption: { text: 'unreachable arrived' } }
+    ]
+  };
+  const issues3 = validateScenario(lateSpawnEarlyMove, map, DEMO_ACTORS);
+  assert.ok(issues3.some((i) => i.stepIndex === 1 && i.field === 'move.entity'));
+  assert.ok(issues3.some((i) => i.stepIndex === 2 && i.field === 'after'));
+
+  // 4. circular arrived dependency (direct self-loop AND 2-entity cycle): must reject
+  const selfCircularMove: ScenarioFile = {
+    meta: { title: 'self circular arrived', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 't1', actor: 'heavy_tank', at: 'capital_north' }] },
+      { after: 't1.arrived', move: { entity: 't1', to: 'peninsula_center' } }
+    ]
+  };
+  assert.ok(validateScenario(selfCircularMove, map, DEMO_ACTORS).some((i) => i.stepIndex === 1 && i.field === 'after'));
+
+  const indirectCircularMove: ScenarioFile = {
+    meta: { title: 'indirect circular arrived', map: 'geopolitics_strait' },
+    timeline: [
+      {
+        at: '0s',
+        spawn: [
+          { id: 't1', actor: 'heavy_tank', at: 'capital_north' },
+          { id: 't2', actor: 'heavy_tank', at: 'coast_point_1' }
+        ]
+      },
+      { after: 't2.arrived', move: { entity: 't1', to: 'peninsula_center' } },
+      { after: 't1.arrived', move: { entity: 't2', to: 'peninsula_center' } }
+    ]
+  };
+  const issues4b = validateScenario(indirectCircularMove, map, DEMO_ACTORS);
+  assert.ok(issues4b.some((i) => i.stepIndex === 1 && i.field === 'after'));
+  assert.ok(issues4b.some((i) => i.stepIndex === 2 && i.field === 'after'));
+
+  // 5. move conditioned on valid independent trigger (`scout.arrived` or `base.built`): must accept when causal order holds
+  const chainedValidTriggers: ScenarioFile = {
+    meta: { title: 'chained valid independent triggers', map: 'geopolitics_strait' },
+    timeline: [
+      {
+        at: '0s',
+        spawn: [
+          { id: 'scout', actor: 'naval_corvette', at: 'port_south' },
+          { id: 'escort', actor: 'destroyer_ship', at: 'port_south' }
+        ],
+        construct: { id: 'radar_1', actor: 'radar_outpost', at: 'capital_north', duration: '1s' }
+      },
+      { at: '0.2s', move: { entity: 'scout', to: 'strait_gate' } },
+      { after: 'scout.arrived', move: { entity: 'escort', to: 'port_east' } },
+      { after: 'escort.arrived', caption: { text: 'وصلت المدمّرة بعد الكشافة' } },
+      { after: 'radar_1.built', sound: 'alert_ping' }
+    ]
+  };
+  assert.deepEqual(validateScenario(chainedValidTriggers, map, DEMO_ACTORS), []);
+
+  // Conditional spawn order mismatch on the exact same `after` trigger must reject
+  const badSameTriggerOrder: ScenarioFile = {
+    meta: { title: 'bad same trigger move before spawn', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 'scout', actor: 'naval_corvette', at: 'port_south' }] },
+      { at: '0.2s', move: { entity: 'scout', to: 'strait_gate' } },
+      { after: 'scout.arrived', move: { entity: 'late_unit', to: 'coast_point_1' } },
+      { after: 'scout.arrived', spawn: [{ id: 'late_unit', actor: 'heavy_tank', at: 'capital_north' }] },
+      { after: 'late_unit.arrived', caption: { text: 'unreachable' } }
+    ]
+  };
+  assert.ok(validateScenario(badSameTriggerOrder, map, DEMO_ACTORS).some((i) => i.stepIndex === 4 && i.field === 'after'));
+
+  // 6. construct then built remains valid
+  const constructBuiltValid: ScenarioFile = {
+    meta: { title: 'construct then built valid', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', construct: { id: 'fob', actor: 'military_base', at: 'capital_north', duration: '2s' } },
+      { after: 'fob.built', pulse: { at: 'capital_north', radius: 65 } }
+    ]
+  };
+  assert.deepEqual(validateScenario(constructBuiltValid, map, DEMO_ACTORS), []);
+
+  // 7. airstrike on valid aircraft keeps `arrived` valid; airstrike on ground unit or before spawn is rejected
+  const validJetStrike: ScenarioFile = {
+    meta: { title: 'valid jet airstrike arrived', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 'jet_1', actor: 'fighter_jet', at: 'capital_north', faction: 'blue' }] },
+      { at: '0.5s', strike: { attacker: 'jet_1', mode: 'airstrike', to: 'peninsula_center', radius: 70 } },
+      { after: 'jet_1.arrived', caption: { text: 'عادت المقاتلة إلى القاعدة' } }
+    ]
+  };
+  assert.deepEqual(validateScenario(validJetStrike, map, DEMO_ACTORS), []);
+
+  const earlyJetStrike: ScenarioFile = {
+    meta: { title: 'early jet airstrike', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0.2s', strike: { attacker: 'jet_1', mode: 'airstrike', to: 'peninsula_center', radius: 70 } },
+      { at: '2s', spawn: [{ id: 'jet_1', actor: 'fighter_jet', at: 'capital_north', faction: 'blue' }] },
+      { after: 'jet_1.arrived', caption: { text: 'unreachable jet' } }
+    ]
+  };
+  const issues7b = validateScenario(earlyJetStrike, map, DEMO_ACTORS);
+  assert.ok(issues7b.some((i) => i.stepIndex === 0 && i.field === 'strike.attacker'));
+  assert.ok(issues7b.some((i) => i.stepIndex === 2 && i.field === 'after'));
+
+  const groundUnitAirstrike: ScenarioFile = {
+    meta: { title: 'ground unit airstrike does not fly', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 'tank_1', actor: 'heavy_tank', at: 'capital_north', faction: 'blue' }] },
+      { at: '0.5s', strike: { attacker: 'tank_1', mode: 'airstrike', to: 'peninsula_center', radius: 70 } },
+      { after: 'tank_1.arrived', caption: { text: 'tank never moved' } }
+    ]
+  };
+  assert.ok(validateScenario(groundUnitAirstrike, map, DEMO_ACTORS).some((i) => i.stepIndex === 2 && i.field === 'after'));
+});
+
+
 
 
 

@@ -112,8 +112,14 @@ export function validateScenario(
   const creationsById = new Map<string, CreationRecord[]>();
   const removalsById = new Map<string, RemovalRecord[]>();
   const earliestAtMoveById = new Map<string, number>();
-  const hasIndependentMotionById = new Set<string>();
-  const airStrikeAttackerIds = new Set<string>();
+
+  interface MotionRecord {
+    id: string;
+    stepIndex: number;
+    kind: 'move' | 'airstrike';
+    trigger: StepTrigger;
+  }
+  const motionsById = new Map<string, MotionRecord[]>();
 
   timeline.forEach((rawStep, idx) => {
     if (!isPlainObj(rawStep)) {
@@ -159,9 +165,9 @@ export function validateScenario(
       removalsById.set(step.remove.entity, list);
     }
     if (isPlainObj(step.move) && isValidEntityId(step.move.entity)) {
-      if (!(trigger.type === 'after' && trigger.event === 'arrived' && trigger.targetId === step.move.entity)) {
-        hasIndependentMotionById.add(step.move.entity);
-      }
+      const list = motionsById.get(step.move.entity) ?? [];
+      list.push({ id: step.move.entity, stepIndex: idx, kind: 'move', trigger });
+      motionsById.set(step.move.entity, list);
       if (trigger.type === 'at') {
         const prev = earliestAtMoveById.get(step.move.entity);
         if (prev === undefined || trigger.atSec < prev) {
@@ -170,9 +176,9 @@ export function validateScenario(
       }
     }
     if (isPlainObj(step.strike) && step.strike.mode === 'airstrike' && isValidEntityId(step.strike.attacker)) {
-      if (!(trigger.type === 'after' && trigger.event === 'arrived' && trigger.targetId === step.strike.attacker)) {
-        airStrikeAttackerIds.add(step.strike.attacker);
-      }
+      const list = motionsById.get(step.strike.attacker) ?? [];
+      list.push({ id: step.strike.attacker, stepIndex: idx, kind: 'airstrike', trigger });
+      motionsById.set(step.strike.attacker, list);
     }
   });
 
@@ -286,6 +292,126 @@ export function validateScenario(
     return false;
   };
 
+  // Fixed-point causal reachability for `<entityId>.built` and `<entityId>.arrived`:
+  // Proves whether a motion command can genuinely execute AFTER creation, BEFORE removal,
+  // and under an achievable non-circular trigger.
+  const achievableBuilt = new Set<string>();
+  const achievableArrived = new Set<string>();
+  const minBuiltSec = new Map<string, number>();
+  const minArrivedSec = new Map<string, number>();
+
+  const getTriggerMinTimeSec = (t: StepTrigger): number | null => {
+    if (t.type === 'at') return t.atSec;
+    if (t.type === 'after') {
+      return t.event === 'built'
+        ? (minBuiltSec.get(t.targetId) ?? null)
+        : (minArrivedSec.get(t.targetId) ?? null);
+    }
+    return null;
+  };
+
+  const isTriggerAchievable = (t: StepTrigger): boolean => {
+    if (t.type === 'at') return true;
+    if (t.type === 'after') {
+      return t.event === 'built' ? achievableBuilt.has(t.targetId) : achievableArrived.has(t.targetId);
+    }
+    return false;
+  };
+
+  const canMotionExecuteAfterCreation = (m: MotionRecord, creator: CreationRecord): boolean => {
+    if (!isTriggerAchievable(m.trigger) || !isTriggerAchievable(creator.trigger)) return false;
+    // Same step: spawn runs before move and strike in StudioEngine.executeStep
+    if (m.stepIndex === creator.stepIndex) {
+      return creator.kind === 'spawn';
+    }
+    // Both on the exact same `after` trigger: step array index determines execution order
+    if (
+      m.trigger.type === 'after' &&
+      creator.trigger.type === 'after' &&
+      m.trigger.targetId === creator.trigger.targetId &&
+      m.trigger.event === creator.trigger.event
+    ) {
+      return m.stepIndex > creator.stepIndex;
+    }
+    // Both timed via `at`: strictly chronological (atSec, stepIndex)
+    if (m.trigger.type === 'at' && creator.trigger.type === 'at') {
+      return (
+        m.trigger.atSec > creator.trigger.atSec ||
+        (m.trigger.atSec === creator.trigger.atSec && m.stepIndex > creator.stepIndex)
+      );
+    }
+    // Timed motion with `after` creator: cannot succeed if creator's earliest trigger is strictly later
+    if (m.trigger.type === 'at' && creator.trigger.type === 'after') {
+      const cMin = getTriggerMinTimeSec(creator.trigger);
+      if (cMin !== null && m.trigger.atSec < cMin) return false;
+    }
+    return true;
+  };
+
+  const isMotionBlockedByRemoval = (m: MotionRecord, removals: RemovalRecord[]): boolean => {
+    for (const rem of removals) {
+      if (rem.stepIndex === m.stepIndex) return true; // Removed on the same tick before completing motion
+      if (isTriggerProvablyAfterRemoval(m.trigger, m.stepIndex, rem)) return true;
+    }
+    return false;
+  };
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+
+    for (const [id, creations] of creationsById) {
+      const creator = creations[0];
+      if (!creator || creator.kind !== 'construct') continue;
+      if (achievableBuilt.has(id)) continue;
+      if (!isTriggerAchievable(creator.trigger)) continue;
+      const removals = removalsById.get(id) ?? [];
+      if (removals.some((r) => r.stepIndex === creator.stepIndex && r.stepIndex >= creator.stepIndex)) continue;
+      achievableBuilt.add(id);
+      const cMin = getTriggerMinTimeSec(creator.trigger);
+      if (cMin !== null) {
+        minBuiltSec.set(id, cMin + creator.constructDurationSec);
+      }
+      changed = true;
+    }
+
+    for (const [id, creations] of creationsById) {
+      const creator = creations[0];
+      if (!creator || creator.kind !== 'spawn') continue;
+      if (achievableArrived.has(id)) continue;
+      if (!isTriggerAchievable(creator.trigger)) continue;
+
+      const actor = actors[creator.actorId];
+      if (actor && (actor.kind === 'building' || actor.speed <= 0)) continue;
+
+      const motions = motionsById.get(id) ?? [];
+      const removals = removalsById.get(id) ?? [];
+      let bestMinTime: number | null = null;
+      let canArrive = false;
+
+      for (const m of motions) {
+        if (m.kind === 'airstrike' && actor?.kind !== 'air') continue;
+        // Self-cycle check (explicit even though least fixed point prevents it)
+        if (m.trigger.type === 'after' && m.trigger.event === 'arrived' && m.trigger.targetId === id) continue;
+        if (!canMotionExecuteAfterCreation(m, creator)) continue;
+        if (isMotionBlockedByRemoval(m, removals)) continue;
+        canArrive = true;
+        const mMin = getTriggerMinTimeSec(m.trigger);
+        if (mMin !== null && (bestMinTime === null || mMin < bestMinTime)) {
+          bestMinTime = mMin;
+        }
+      }
+
+      if (canArrive) {
+        achievableArrived.add(id);
+        if (bestMinTime !== null) {
+          minArrivedSec.set(id, bestMinTime);
+        }
+        changed = true;
+      }
+    }
+  }
+
   const checkEntityLifecycle = (
     stepIdx: number,
     field: string,
@@ -378,14 +504,18 @@ export function validateScenario(
           });
           return;
         }
-        const canMove =
-          hasIndependentMotionById.has(targetId) ||
-          (actor?.kind === 'air' && airStrikeAttackerIds.has(targetId));
+        const canMove = achievableArrived.has(targetId);
         if (!canMove) {
+          const motions = motionsById.get(targetId) ?? [];
+          const hasAnyValidKindMotion = motions.some(
+            (m) => m.kind === 'move' || (m.kind === 'airstrike' && actor?.kind === 'air')
+          );
           issues.push({
             stepIndex: stepIdx,
             field: 'after',
-            message: `الوحدة "${targetId}" لا تملك أمر move لتحقيق محفز arrived`
+            message: hasAnyValidKindMotion
+              ? `محفز "${targetId}.arrived" غير قابل للتحقق لأن أمر الحركة سابق للإنشاء أو محذوف أو في دورة اعتماد غير قابلة للتنفيذ`
+              : `الوحدة "${targetId}" لا تملك أمر حركة قابل للتنفيذ لتحقيق محفز arrived`
           });
           return;
         }
