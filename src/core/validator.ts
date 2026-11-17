@@ -417,15 +417,25 @@ export function validateScenario(
   };
 
   let changed = true;
-  while (changed) {
+  let fixedPointIters = 0;
+  const maxFixedPointIters = (creationsById.size + 1) * 8 + 32;
+  while (changed && fixedPointIters++ < maxFixedPointIters) {
     changed = false;
 
     for (const [id, creations] of creationsById) {
       const creator = creations[0];
       if (!creator || creator.kind !== 'construct') continue;
-      if (!isTriggerAchievable(creator.trigger)) continue;
       const removals = removalsById.get(id) ?? [];
-      if (removals.some((r) => r.stepIndex === creator.stepIndex)) continue;
+      if (!isTriggerAchievable(creator.trigger) || removals.some((r) => r.stepIndex === creator.stepIndex)) {
+        if (achievableBuilt.has(id)) {
+          achievableBuilt.delete(id);
+          builtMinSec.delete(id);
+          builtMaxSec.delete(id);
+          builtAncestors.delete(id);
+          changed = true;
+        }
+        continue;
+      }
 
       const cMin = getTriggerMinSec(creator.trigger);
       const cMax = getTriggerMaxSec(creator.trigger);
@@ -459,7 +469,15 @@ export function validateScenario(
     for (const [id, creations] of creationsById) {
       const creator = creations[0];
       if (!creator || creator.kind !== 'spawn') continue;
-      if (!isTriggerAchievable(creator.trigger)) continue;
+      if (!isTriggerAchievable(creator.trigger)) {
+        if (achievableArrived.has(id)) {
+          achievableArrived.delete(id);
+          arrivedMinFinishSec.delete(id);
+          arrivedAncestors.delete(id);
+          changed = true;
+        }
+        continue;
+      }
 
       const actor = actors[creator.actorId];
       if (actor && (actor.kind === 'building' || actor.speed <= 0)) continue;
@@ -495,7 +513,12 @@ export function validateScenario(
       }
 
       if (canArrive) {
-        const finalAnc = intersectAnc ?? new Set<string>();
+        // Arrival depends both on the entity's own creation ancestry (including `creator.trigger` itself if `after`)
+        // AND on the intersection of ancestors across all executable motion triggers.
+        const finalAnc = getStepPredecessorTriggers(creator.trigger);
+        if (intersectAnc) {
+          for (const a of intersectAnc) finalAnc.add(a);
+        }
         if (!achievableArrived.has(id)) {
           achievableArrived.add(id);
           if (bestMinFinish !== null) arrivedMinFinishSec.set(id, bestMinFinish);

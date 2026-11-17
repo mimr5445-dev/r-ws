@@ -1088,6 +1088,120 @@ test('TASK 0.2.3: cross-branch trigger causality distinguishes min/max bounds, a
   assert.ok(issues5b.some((i) => i.stepIndex === 4 && i.field === 'after'));
 });
 
+test('TASK 0.2.4: arrivedAncestors preserves creation ancestry alongside intersected motion paths', () => {
+  const map = DEMO_MAPS.geopolitics_strait;
+
+  // 1. Unit created `after: sub_base.built` (which builds `after: base.built`) moves on another trigger
+  // and on `sub_base.built`; `unit.arrived` must preserve `sub_base.built` & `base.built` for a subsequent unit.
+  const creationAncestryChainValid: ScenarioFile = {
+    meta: { title: 'creation ancestry preserved across arrived chain', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', construct: { id: 'base', actor: 'military_base', at: 'capital_north', duration: '1s' } },
+      { after: 'base.built', construct: { id: 'sub_base', actor: 'radar_outpost', at: 'coast_point_1', duration: '1s' } },
+      { at: '0s', spawn: [{ id: 'scout', actor: 'naval_corvette', at: 'port_south' }] },
+      { at: '4s', move: { entity: 'scout', to: 'strait_gate' } },
+      { after: 'sub_base.built', spawn: [{ id: 'unit', actor: 'heavy_tank', at: 'capital_north' }] },
+      { after: 'sub_base.built', move: { entity: 'unit', to: 'peninsula_center' } },
+      { after: 'scout.arrived', move: { entity: 'unit', to: 'coast_point_1' } },
+      { after: 'sub_base.built', spawn: [{ id: 'late_unit', actor: 'heavy_tank', at: 'coast_point_1' }] },
+      { after: 'unit.arrived', move: { entity: 'late_unit', to: 'peninsula_center' } },
+      { after: 'late_unit.arrived', caption: { text: 'تم إثبات ترتيب الإنشاء عبر أسلاف الوصول' } }
+    ]
+  };
+  assert.deepEqual(validateScenario(creationAncestryChainValid, map, DEMO_ACTORS), []);
+
+  // 2. Unit created `after: sub_base.built` inherits creation ancestry even when move uses timed `at`
+  const singleAtMoveInheritsCreationAncestry: ScenarioFile = {
+    meta: { title: 'single at move inherits creation ancestry', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', construct: { id: 'base', actor: 'military_base', at: 'capital_north', duration: '1s' } },
+      { after: 'base.built', construct: { id: 'sub_base', actor: 'radar_outpost', at: 'coast_point_1', duration: '1s' } },
+      { after: 'sub_base.built', spawn: [{ id: 'unit', actor: 'heavy_tank', at: 'capital_north' }] },
+      { at: '3s', move: { entity: 'unit', to: 'peninsula_center' } },
+      { after: 'base.built', spawn: [{ id: 'follow_unit', actor: 'heavy_tank', at: 'coast_point_1' }] },
+      { after: 'unit.arrived', move: { entity: 'follow_unit', to: 'peninsula_center' } },
+      { after: 'follow_unit.arrived', caption: { text: 'تم توريث أسلاف الإنشاء مع أمر حركة at' } }
+    ]
+  };
+  assert.deepEqual(validateScenario(singleAtMoveInheritsCreationAncestry, map, DEMO_ACTORS), []);
+
+  // Dual moves where an `at` move empties motion intersection still preserve creation ancestry (`base.built` & `sub_base.built`)
+  const atMovePlusConditionalMovePreservesCreationAncestry: ScenarioFile = {
+    meta: { title: 'at plus conditional moves keep creation ancestry', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', construct: { id: 'base', actor: 'military_base', at: 'capital_north', duration: '1s' } },
+      { after: 'base.built', construct: { id: 'sub_base', actor: 'radar_outpost', at: 'coast_point_1', duration: '1s' } },
+      { after: 'sub_base.built', spawn: [{ id: 'unit', actor: 'heavy_tank', at: 'capital_north' }] },
+      { after: 'sub_base.built', move: { entity: 'unit', to: 'peninsula_center' } },
+      { at: '5s', move: { entity: 'unit', to: 'coast_point_1' } },
+      { after: 'sub_base.built', spawn: [{ id: 'follow_unit', actor: 'heavy_tank', at: 'coast_point_1' }] },
+      { after: 'unit.arrived', move: { entity: 'follow_unit', to: 'peninsula_center' } },
+      { after: 'follow_unit.arrived', caption: { text: 'نجحت مع وجود at وحركة شرطية' } }
+    ]
+  };
+  assert.deepEqual(validateScenario(atMovePlusConditionalMovePreservesCreationAncestry, map, DEMO_ACTORS), []);
+
+  // 3. Multiple valid moves: inherit ONLY common dependency across motion paths while keeping shared creation ancestors.
+  // `shared_gate` has unbounded upper bound (built after `scout.arrived`), so `u_shared` can only prove order via shared motion ancestry.
+  const sharedMotionAndCreationAncestryAccepted: ScenarioFile = {
+    meta: { title: 'shared motion dependency plus creation ancestry accepted', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 'scout', actor: 'naval_corvette', at: 'port_south' }] },
+      { at: '0s', move: { entity: 'scout', to: 'strait_gate' } },
+      { at: '0s', construct: { id: 'base', actor: 'military_base', at: 'capital_north', duration: '1s' } },
+      { after: 'scout.arrived', construct: { id: 'shared_gate', actor: 'radar_outpost', at: 'coast_point_1', duration: '1s' } },
+      { after: 'shared_gate.built', construct: { id: 'branch_a', actor: 'radar_outpost', at: 'peninsula_center', duration: '1s' } },
+      { after: 'shared_gate.built', construct: { id: 'branch_b', actor: 'radar_outpost', at: 'capital_north', duration: '1s' } },
+      { after: 'branch_b.built', construct: { id: 'only_b', actor: 'radar_outpost', at: 'coast_point_1', duration: '1s' } },
+      { after: 'base.built', spawn: [{ id: 'unit', actor: 'heavy_tank', at: 'capital_north' }] },
+      { after: 'branch_a.built', move: { entity: 'unit', to: 'peninsula_center' } },
+      { after: 'only_b.built', move: { entity: 'unit', to: 'coast_point_1' } },
+      { after: 'shared_gate.built', spawn: [{ id: 'u_shared', actor: 'heavy_tank', at: 'coast_point_1' }] },
+      { after: 'unit.arrived', move: { entity: 'u_shared', to: 'peninsula_center' } },
+      { after: 'u_shared.arrived', caption: { text: 'تم توريث الاعتماد المشترك بين المسارات' } }
+    ]
+  };
+  assert.deepEqual(validateScenario(sharedMotionAndCreationAncestryAccepted, map, DEMO_ACTORS), []);
+
+  // Single-branch dependency `only_b.built` is NOT shared with `branch_a.built`, so `u_only_b` must be REJECTED
+  const unsharedMotionBranchRejected: ScenarioFile = {
+    meta: { title: 'unshared motion branch dependency rejected', map: 'geopolitics_strait' },
+    timeline: [
+      { at: '0s', spawn: [{ id: 'scout', actor: 'naval_corvette', at: 'port_south' }] },
+      { at: '0s', move: { entity: 'scout', to: 'strait_gate' } },
+      { at: '0s', construct: { id: 'base', actor: 'military_base', at: 'capital_north', duration: '1s' } },
+      { after: 'scout.arrived', construct: { id: 'shared_gate', actor: 'radar_outpost', at: 'coast_point_1', duration: '1s' } },
+      { after: 'shared_gate.built', construct: { id: 'branch_a', actor: 'radar_outpost', at: 'peninsula_center', duration: '1s' } },
+      { after: 'shared_gate.built', construct: { id: 'branch_b', actor: 'radar_outpost', at: 'capital_north', duration: '1s' } },
+      { after: 'branch_b.built', construct: { id: 'only_b', actor: 'radar_outpost', at: 'coast_point_1', duration: '1s' } },
+      { after: 'base.built', spawn: [{ id: 'unit', actor: 'heavy_tank', at: 'capital_north' }] },
+      { after: 'branch_a.built', move: { entity: 'unit', to: 'peninsula_center' } },
+      { after: 'only_b.built', move: { entity: 'unit', to: 'coast_point_1' } },
+      { after: 'only_b.built', spawn: [{ id: 'u_only_b', actor: 'heavy_tank', at: 'coast_point_1' }] },
+      { after: 'unit.arrived', move: { entity: 'u_only_b', to: 'peninsula_center' } },
+      { after: 'u_only_b.arrived', caption: { text: 'should reject unshared branch' } }
+    ]
+  };
+  const issuesUnshared = validateScenario(unsharedMotionBranchRejected, map, DEMO_ACTORS);
+  assert.ok(issuesUnshared.some((i) => i.stepIndex === 11 && i.field === 'move.entity'));
+  assert.ok(issuesUnshared.some((i) => i.stepIndex === 12 && i.field === 'after'));
+
+  // 4. Circular construction + arrival cycle must still be rejected cleanly without hanging
+  const constructArrivedCycle: ScenarioFile = {
+    meta: { title: 'construct arrived cycle', map: 'geopolitics_strait' },
+    timeline: [
+      { after: 'unit.arrived', construct: { id: 'cyc_base', actor: 'military_base', at: 'capital_north', duration: '1s' } },
+      { after: 'cyc_base.built', spawn: [{ id: 'unit', actor: 'heavy_tank', at: 'capital_north' }] },
+      { after: 'cyc_base.built', move: { entity: 'unit', to: 'peninsula_center' } },
+      { after: 'unit.arrived', caption: { text: 'cyclic unreachable' } }
+    ]
+  };
+  const issuesCycle = validateScenario(constructArrivedCycle, map, DEMO_ACTORS);
+  assert.ok(issuesCycle.some((i) => i.stepIndex === 0 && i.field === 'after'));
+  assert.ok(issuesCycle.some((i) => i.stepIndex === 3 && i.field === 'after'));
+});
+
+
 
 
 
