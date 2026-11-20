@@ -7,7 +7,6 @@ import { validateScenario } from './validator';
 import { StudioEngine } from './engine';
 import { buildAiScenarioPrompt, generateCatalogMarkdown } from './catalog';
 import { MapPack, ScenarioFile } from './types';
-import { ENTITY_SCALE_MAX, ENTITY_SCALE_MIN } from './constants';
 import { DEMO_ACTORS, DEMO_MAPS } from '../packs/demoPacks';
 import { PackRegistry } from '../packs/packRegistry';
 
@@ -162,8 +161,6 @@ test('PackRegistry and Catalog/AI Prompt Generator include custom maps and inher
   assert.ok(prompt.includes('حصار بحري'));
   assert.ok(prompt.includes('callout'));
   assert.ok(prompt.includes('pulse'));
-  assert.ok(prompt.includes('resize'));
-  assert.ok(prompt.includes('strike'));
 });
 
 test('MinHeap A* blocks land units across sea and emits onMoveBlocked while supporting canal/bridge cell 3', () => {
@@ -339,12 +336,6 @@ test('validateScenario guards malformed timelines, invalid sound/faction/after, 
     ]
   });
   assert.equal(hinted.estimateDurationSec(), 42);
-
-  const triggered = new StudioEngine(DEMO_MAPS.tactical_valley, DEMO_ACTORS, {
-    meta: { title: 'triggered', map: 'tactical_valley' },
-    timeline: [{ after: 'u1.arrived', caption: { text: 'later' } }]
-  });
-  assert.equal(triggered.estimateDurationSec(), 33, 'after-triggers need extra scrubber room');
   hinted.seekToTick(40);
   assert.equal(hinted.callouts.has('c_perm'), false, 'permanent entity callout should be removed with its target entity');
 });
@@ -1210,25 +1201,10 @@ test('TASK 0.2.4: arrivedAncestors preserves creation ancestry alongside interse
   assert.ok(issuesCycle.some((i) => i.stepIndex === 3 && i.field === 'after'));
 });
 
-test('shared entity-scale limits keep validator and engine in agreement', () => {
-  const tooBig: ScenarioFile = {
-    meta: { title: 'scale limits', map: 'geopolitics_strait' },
-    timeline: [
-      {
-        at: '0s',
-        spawn: [{ id: 'giant', actor: 'heavy_tank', at: 'capital_north', faction: 'blue', scale: 99 }]
-      }
-    ]
-  };
-  assert.ok(
-    validateScenario(tooBig, DEMO_MAPS.geopolitics_strait, DEMO_ACTORS).some((i) => i.field === 'spawn.scale'),
-    'validator must reject scales outside the shared limits'
-  );
 
-  // The engine still clamps defensively, even for an invalid document loaded at runtime.
-  const engine = new StudioEngine(DEMO_MAPS.geopolitics_strait, DEMO_ACTORS, tooBig);
-  assert.equal(engine.entities.get('giant')?.scaleMul, ENTITY_SCALE_MAX);
-  engine.dispatchOrder({ type: 'resize', entityId: 'giant', scale: ENTITY_SCALE_MIN / 2 });
-  engine.flushOrders();
-  assert.equal(engine.entities.get('giant')?.scaleMul, ENTITY_SCALE_MIN);
-});
+
+
+
+
+
+

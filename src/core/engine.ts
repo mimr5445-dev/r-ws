@@ -1,4 +1,3 @@
-import { clampEntityScale, DT, TICK_RATE } from './constants';
 import { findPath, isWalkable } from './pathfinding';
 import {
   ActorPack,
@@ -29,7 +28,8 @@ function resolvePoint(map: MapPack, ref: PointRef | undefined): Point | undefine
   return undefined;
 }
 
-export { TICK_RATE, DT } from './constants';
+export const TICK_RATE = 30;
+export const DT = 1 / TICK_RATE;
 
 const STRICT_SEC_RE = /^(?:\d+(?:\.\d+)?|\.\d+)(?:\s*s)?$/i;
 
@@ -121,18 +121,14 @@ export class StudioEngine {
   estimateDurationSec(): number {
     const hint = parseStrictSec(this.scenario.meta?.duration_hint);
     let maxAt = Math.max(18, hint ?? 18);
-    let hasArrivalTrigger = false;
     const steps = Array.isArray(this.scenario.timeline) ? this.scenario.timeline : [];
     for (const st of steps) {
       if (st?.at !== undefined) {
         const atSec = parseStrictSec(st.at);
         if (atSec !== null) maxAt = Math.max(maxAt, atSec + 8);
       }
-      if (st?.after) hasArrivalTrigger = true;
     }
-    // `after` steps have no timestamp; keep enough scrubber room for the
-    // unit to actually arrive and the triggered step to play out.
-    return hasArrivalTrigger ? maxAt + 15 : maxAt;
+    return maxAt;
   }
 
   seekToTick(targetTick: number): void {
@@ -700,7 +696,7 @@ export class StudioEngine {
           speed: act.speed,
           turnRate: act.turnRate,
           scale: act.scale,
-          scaleMul: clampEntityScale(ord.scale ?? 1),
+          scaleMul: ord.scale !== undefined ? Math.max(0.25, Math.min(3.5, ord.scale)) : 1,
           radius: act.radius,
           buildProgress: 1,
           buildRate: 1,
@@ -736,7 +732,7 @@ export class StudioEngine {
           speed: 0,
           turnRate: 0,
           scale: act.scale,
-          scaleMul: clampEntityScale(ord.scale ?? 1),
+          scaleMul: ord.scale !== undefined ? Math.max(0.25, Math.min(3.5, ord.scale)) : 1,
           radius: act.radius,
           buildProgress: 0,
           buildRate: 1 / Math.max(0.2, ord.durationSec),
@@ -750,7 +746,7 @@ export class StudioEngine {
       } else if (ord.type === 'resize') {
         const ent = this.entities.get(ord.entityId);
         if (ent && Number.isFinite(ord.scale)) {
-          ent.scaleMul = clampEntityScale(ord.scale);
+          ent.scaleMul = Math.max(0.25, Math.min(3.5, ord.scale));
         }
       } else if (ord.type === 'move') {
         const ent = this.entities.get(ord.entityId);

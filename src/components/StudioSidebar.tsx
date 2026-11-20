@@ -16,7 +16,6 @@ import {
   Volume2,
   VolumeX
 } from 'lucide-react';
-import { ENTITY_SCALE_MAX, ENTITY_SCALE_MIN, UNIT_SCALE_MAX, UNIT_SCALE_MIN } from '../core/constants';
 import { ActorPack, Faction, MapPack, SavedScenarioRecord, ValidationIssue } from '../core/types';
 import { MapEditTool, PackBuilderPanel } from './PackBuilderPanel';
 
@@ -307,8 +306,8 @@ export function StudioSidebar(props: StudioSidebarProps) {
               <input
                 id="unitScaleSlider"
                 type="range"
-                min={UNIT_SCALE_MIN}
-                max={UNIT_SCALE_MAX}
+                min="0.3"
+                max="2.0"
                 step="0.05"
                 value={unitScale}
                 onChange={(e) => onChangeUnitScale(parseFloat(e.target.value))}
@@ -591,8 +590,8 @@ export function StudioSidebar(props: StudioSidebarProps) {
                     id="selectedUnitScaleSlider"
                     aria-label="حجم الوحدة المحددة"
                     type="range"
-                    min={ENTITY_SCALE_MIN}
-                    max={ENTITY_SCALE_MAX}
+                    min="0.3"
+                    max="2.8"
                     step="0.05"
                     value={selectedEntityScale}
                     onChange={(e) => onChangeSelectedEntityScale(parseFloat(e.target.value))}
@@ -649,8 +648,8 @@ export function StudioSidebar(props: StudioSidebarProps) {
                     id="toolUnitScaleSlider"
                     aria-label="حجم الأداة الفردي"
                     type="range"
-                    min={ENTITY_SCALE_MIN}
-                    max={ENTITY_SCALE_MAX}
+                    min="0.3"
+                    max="2.8"
                     step="0.05"
                     value={activeToolScale}
                     onChange={(e) => onChangeActiveToolScale(parseFloat(e.target.value))}
@@ -960,28 +959,6 @@ export function StudioSidebar(props: StudioSidebarProps) {
           packNotice={props.packNotice}
         />
       )}
-
-      <div
-        aria-label="اختصارات لوحة المفاتيح"
-        className="mt-auto pt-2 border-t border-slate-800/80 text-[10px] text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-1 shrink-0"
-      >
-        <span className="inline-flex items-center gap-1">
-          <kbd className="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono">Space</kbd>
-          تشغيل
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <kbd className="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono">R</kbd>
-          إعادة
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <kbd className="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono">?</kbd>
-          الدليل
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <kbd className="px-1 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono">Esc</kbd>
-          إلغاء
-        </span>
-      </div>
     </aside>
   );
 }
