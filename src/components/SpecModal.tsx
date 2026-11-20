@@ -40,7 +40,7 @@ export function SpecModal({ open, onClose, activeMap, maps, actors }: SpecModalP
       <div className="w-full max-w-2xl max-h-[85vh] flex flex-col bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
           <h2 id="spec-modal-title" className="text-base font-semibold text-sky-400">
-            مرجع لغة السيناريو (YAML DSL v0.2)
+            مرجع لغة السيناريو (YAML DSL v0.3)
           </h2>
           <div className="flex items-center gap-2">
             <button
@@ -68,20 +68,23 @@ export function SpecModal({ open, onClose, activeMap, maps, actors }: SpecModalP
             <code className="text-sky-300">zones</code>) والكيانات (<code className="text-sky-300">actors</code>) المعرّفة في الفهرس.
             كل خطوة في <code className="text-sky-300">timeline</code> تبدأ بـ{' '}
             <code className="text-amber-300">at: &quot;&lt;sec&gt;s&quot;</code> أو{' '}
-            <code className="text-amber-300">after: &quot;&lt;entity_id&gt;.arrived&quot;</code>.
+            <code className="text-amber-300">after: &quot;&lt;entity_id&gt;.arrived&quot;</code>{' '}
+            أو <code className="text-amber-300">&quot;&lt;entity_id&gt;.built&quot;</code> — واحدة فقط، ولا يُجمع بينهما.
           </p>
 
           <div className="space-y-2">
-            <h3 className="text-xs font-semibold text-slate-400">الأوامر المتاحة (v0.2)</h3>
+            <h3 className="text-xs font-semibold text-slate-400">الأوامر المتاحة (v0.3)</h3>
             <pre
               dir="ltr"
               className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 text-xs text-cyan-200 overflow-x-auto leading-6"
             >{`camera:     { focus: "<anchor_id>", zoom: 1.35, duration?: "1.2s" }
 caption:    { text: "نص التعليق السفلي" }
 sound:      "build_complete" | "alert_ping" | "move_order" | "spawn_pop" | "jet_takeoff" | "missile_launch" | "explosion" | "ship_horn"
-spawn:      [{ id, actor, at: "<anchor_id>", faction?: "blue"|"red"|"neutral" }]
+spawn:      [{ id, actor, at: "<anchor_id>", faction?: "blue"|"red"|"neutral", scale?: 1.4 }]
 move:       { entity: "<entity_id>", to: "<anchor_id>" }
-construct:  { id?, actor: "<building_actor>", at: "<anchor_id>", faction?, duration?: "2s" }
+# كل موضع يقبل مرساة أو إحداثيات حرة: { x: 100, y: 200 }
+construct:  { id?, actor: "<building_actor>", at: "<anchor_id>", faction?, duration?: "2s", scale? }
+resize:     { entity: "<entity_id>", scale: 1.4 }
 remove:     { entity: "<entity_id>" }
 strike:     { attacker?: "<entity_id>", mode: "airstrike"|"missile", from?: "<anchor_id>", to: "<anchor_id>", radius?: 75, color?: "#ef4444" }
 draw_arrow: { id, from: "<anchor_id>", to: "<anchor_id>", color?: "#hex", dashed?: true, duration?: "1.5s" }

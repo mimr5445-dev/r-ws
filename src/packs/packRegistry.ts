@@ -51,8 +51,12 @@ export class PackRegistry {
 
     const savedScenarios = await studioDb.loadAllScenarios();
     const existingIds = new Set(savedScenarios.map((s) => s.id));
+    // Presets are seeded once; a deleted preset must stay deleted across reloads.
+    const deletedPresetIds = new Set(
+      (await studioDb.getSetting<string[]>('deletedPresetIds')) ?? []
+    );
     for (const p of presetScenarios) {
-      if (!existingIds.has(p.id)) {
+      if (!existingIds.has(p.id) && !deletedPresetIds.has(p.id)) {
         await studioDb.saveScenario(p);
         savedScenarios.push(p);
       }

@@ -1,4 +1,5 @@
 import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
+import { clampCameraZoom } from '../core/constants';
 import { StudioEngine, normalizeAngleDiff } from '../core/engine';
 import { EntityState, Faction, MapPack, Point } from '../core/types';
 import { sanitizeAssetUrl } from '../packs/packSchema';
@@ -124,6 +125,7 @@ export class StudioRenderer {
   private geoHoverGraphics = new Graphics();
   private geoSelectGraphics = new Graphics();
   private navOverlay = new Graphics();
+  private draftZoneGraphics = new Graphics();
   private zoneGraphics = new Graphics();
   private craterGraphics = new Graphics();
   private wakeGraphics = new Graphics();
@@ -156,6 +158,8 @@ export class StudioRenderer {
   private mapHeight = 800;
   private lastUnitFactor = 1;
   private currentHitTest?: (pt: Point) => string | null;
+  private navOverlayDirty = true;
+  private navOverlayKey = '';
 
   public userUnitScale = 1.0;
   public selectedEntityId: string | null = null;
@@ -212,6 +216,7 @@ export class StudioRenderer {
       this.geoHoverGraphics,
       this.geoSelectGraphics,
       this.navOverlay,
+      this.draftZoneGraphics,
       this.zoneGraphics,
       this.craterGraphics,
       this.wakeGraphics,
@@ -289,7 +294,7 @@ export class StudioRenderer {
       e.preventDefault();
       this.lastCamSeq = this.currentTargetSeq;
       const factor = e.deltaY < 0 ? 1.1 : 0.9;
-      this.camZoom = Math.max(0.35, Math.min(4, this.camZoom * factor));
+      this.camZoom = clampCameraZoom(this.camZoom * factor, this.camZoom);
     };
 
     const onCanvasHoverMove = (e: PointerEvent) => {
@@ -351,7 +356,12 @@ export class StudioRenderer {
 
   zoomBy(factor: number): void {
     this.lastCamSeq = this.currentTargetSeq;
-    this.camZoom = Math.max(0.35, Math.min(4, this.camZoom * factor));
+    this.camZoom = clampCameraZoom(this.camZoom * factor, this.camZoom);
+  }
+
+  /** Marks the navigation-grid overlay for a rebuild after nav cells were painted. */
+  invalidateNavOverlay(): void {
+    this.navOverlayDirty = true;
   }
 
   resetCamera(): void {
@@ -377,7 +387,7 @@ export class StudioRenderer {
       );
       this.camX = clamped.x;
       this.camY = clamped.y;
-      this.camZoom = engine.cameraTarget.zoom;
+      this.camZoom = clampCameraZoom(engine.cameraTarget.zoom);
       this.lastCamSeq = engine.cameraTarget.seq;
     }
     this.particles = [];
@@ -468,6 +478,10 @@ export class StudioRenderer {
     this.calloutLayer.removeChildren();
     this.geoHoverGraphics.clear();
     this.geoSelectGraphics.clear();
+    this.navOverlay.clear();
+    this.draftZoneGraphics.clear();
+    this.navOverlayDirty = true;
+    this.navOverlayKey = '';
     this.craterGraphics.clear();
     this.wakeGraphics.clear();
     this.projectileGraphics.clear();
@@ -510,12 +524,14 @@ export class StudioRenderer {
   render(engine: StudioEngine, alpha: number, timeSec: number, frameDt = 0.016, isPlaying = true): void {
     if (this.destroyed) return;
     this.anchorLayer.visible = !this.hideUIHelpers && this.showAnchors;
+    // Keep the exported WebM cinematic: no callout cards, anchors or selection rings.
+    this.calloutLayer.visible = !this.hideUIHelpers;
     if (engine.cameraTarget) {
       this.currentTargetSeq = engine.cameraTarget.seq;
     }
 
     if (engine.cameraTarget && engine.cameraTarget.seq !== this.lastCamSeq) {
-      const targetZoom = engine.cameraTarget.zoom;
+      const targetZoom = clampCameraZoom(engine.cameraTarget.zoom);
       const goal = this.computeClampedCameraGoal(engine.cameraTarget.x, engine.cameraTarget.y, targetZoom);
       const speedFactor = 1 - Math.exp((-frameDt * 3.6) / Math.max(0.25, engine.cameraTarget.durationSec));
       this.camX = lerp(this.camX, goal.x, speedFactor);
@@ -548,34 +564,53 @@ export class StudioRenderer {
     this.drawRegionHighlight(this.geoHoverGraphics, engine, this.hoveredRegionId, 0x38bdf8, 0.2, 0x38bdf8, 1.8);
     this.drawRegionHighlight(this.geoSelectGraphics, engine, this.selectedRegionId, 0xf59e0b, 0.24, 0xf59e0b, 2.6);
 
-    // طبقة شبكة الملاحة ومسودة المناطق في وضع صانع الخرائط
-    this.navOverlay.clear();
-    if (this.editorOverlay.enabled && this.editorOverlay.showNavGrid) {
+    // طبقة شبكة الملاحة في وضع صانع الخرائط.
+    // تُبنى مرة واحدة فقط (أو بعد تعديل خلية) بدل إعادة رسم عشرات الآلاف من المربعات كل إطار.
+    const navVisible = this.editorOverlay.enabled && this.editorOverlay.showNavGrid;
+    if (!navVisible) {
+      if (this.navOverlay.visible) {
+        this.navOverlay.clear();
+        this.navOverlay.visible = false;
+        this.navOverlayDirty = true;
+      }
+    } else {
       const m = engine.map;
-      for (let y = 0; y < m.rows; y++) {
-        for (let x = 0; x < m.cols; x++) {
-          const cell = m.navGrid[y * m.cols + x];
-          if (cell === 1) {
-            this.navOverlay
-              .rect(x * m.cellSize, y * m.cellSize, m.cellSize, m.cellSize)
-              .fill({ color: 0x38bdf8, alpha: 0.25 });
-          } else if (cell === 2) {
-            this.navOverlay
-              .rect(x * m.cellSize, y * m.cellSize, m.cellSize, m.cellSize)
-              .fill({ color: 0xef4444, alpha: 0.35 });
-          } else if (cell === 3) {
-            this.navOverlay
-              .rect(x * m.cellSize, y * m.cellSize, m.cellSize, m.cellSize)
-              .fill({ color: 0x10b981, alpha: 0.35 });
+      const key = `${m.id}:${m.cols}x${m.rows}:${m.cellSize}`;
+      if (this.navOverlayDirty || key !== this.navOverlayKey) {
+        this.navOverlay.clear();
+        for (let y = 0; y < m.rows; y++) {
+          for (let x = 0; x < m.cols; x++) {
+            const cell = m.navGrid[y * m.cols + x];
+            if (cell === 1) {
+              this.navOverlay
+                .rect(x * m.cellSize, y * m.cellSize, m.cellSize, m.cellSize)
+                .fill({ color: 0x38bdf8, alpha: 0.25 });
+            } else if (cell === 2) {
+              this.navOverlay
+                .rect(x * m.cellSize, y * m.cellSize, m.cellSize, m.cellSize)
+                .fill({ color: 0xef4444, alpha: 0.35 });
+            } else if (cell === 3) {
+              this.navOverlay
+                .rect(x * m.cellSize, y * m.cellSize, m.cellSize, m.cellSize)
+                .fill({ color: 0x10b981, alpha: 0.35 });
+            }
           }
         }
+        this.navOverlayKey = key;
+        this.navOverlayDirty = false;
       }
+      this.navOverlay.visible = true;
     }
+
+    // مسودة المنطقة تُرسم كل إطار لأنها تتغيّر مع كل نقرة.
+    this.draftZoneGraphics.clear();
     if (this.editorOverlay.enabled && this.editorOverlay.draftZonePoints.length > 0) {
       const pts = this.editorOverlay.draftZonePoints;
-      pts.forEach((p) => this.navOverlay.circle(p.x, p.y, 5).fill({ color: 0xf472b6 }));
+      pts.forEach((p) => this.draftZoneGraphics.circle(p.x, p.y, 5).fill({ color: 0xf472b6 }));
       if (pts.length > 1) {
-        this.navOverlay.poly(pts.flatMap((p) => [p.x, p.y]), false).stroke({ width: 2, color: 0xf472b6 });
+        this.draftZoneGraphics
+          .poly(pts.flatMap((p) => [p.x, p.y]), false)
+          .stroke({ width: 2, color: 0xf472b6 });
       }
     }
 

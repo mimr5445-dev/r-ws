@@ -1,3 +1,4 @@
+import { ENTITY_SCALE_MAX, ENTITY_SCALE_MIN, FACTIONS, SOUND_IDS } from './constants';
 import { parseStrictSec } from './engine';
 import { ActorPack, MapPack, PointRef, ScenarioFile, ScenarioStep, ValidationIssue } from './types';
 
@@ -16,17 +17,9 @@ function closestKey(target: string, keys: string[]): string | null {
   return best;
 }
 
-const VALID_FACTIONS = new Set(['blue', 'red', 'neutral']);
-const VALID_SOUNDS = new Set([
-  'build_complete',
-  'alert_ping',
-  'move_order',
-  'spawn_pop',
-  'jet_takeoff',
-  'missile_launch',
-  'explosion',
-  'ship_horn'
-]);
+const VALID_FACTIONS = new Set<string>(FACTIONS);
+const VALID_SOUNDS = new Set<string>(SOUND_IDS);
+const SCALE_MESSAGE = `معامل الحجم scale يجب أن يكون رقمًا بين ${ENTITY_SCALE_MIN} و ${ENTITY_SCALE_MAX}`;
 const VALID_ENTITY_ID_RE = /^[^\s.]+$/;
 type AfterEvent = 'arrived' | 'built';
 const AFTER_TRIGGER_RE = /^([^\s.]+)\.(arrived|built)$/;
@@ -816,8 +809,8 @@ export function validateScenario(
           if (s.faction !== undefined && (typeof s.faction !== 'string' || !VALID_FACTIONS.has(s.faction))) {
             issues.push({ stepIndex: idx, field: 'spawn.faction', message: `فصيل غير معروف "${String(s.faction)}"` });
           }
-          if (s.scale !== undefined && (typeof s.scale !== 'number' || !Number.isFinite(s.scale) || s.scale < 0.2 || s.scale > 4)) {
-            issues.push({ stepIndex: idx, field: 'spawn.scale', message: 'معامل الحجم scale يجب أن يكون رقمًا بين 0.2 و 4' });
+          if (s.scale !== undefined && (typeof s.scale !== 'number' || !Number.isFinite(s.scale) || s.scale < ENTITY_SCALE_MIN || s.scale > ENTITY_SCALE_MAX)) {
+            issues.push({ stepIndex: idx, field: 'spawn.scale', message: SCALE_MESSAGE });
           }
         }
       }
@@ -848,8 +841,8 @@ export function validateScenario(
         issues.push({ stepIndex: idx, field: 'resize', message: 'resize يجب أن يكون كائنًا' });
       } else {
         checkEntityLifecycle(idx, 'resize.entity', step.resize.entity, 'resize');
-        if (typeof step.resize.scale !== 'number' || !Number.isFinite(step.resize.scale) || step.resize.scale < 0.2 || step.resize.scale > 4) {
-          issues.push({ stepIndex: idx, field: 'resize.scale', message: 'معامل الحجم scale يجب أن يكون رقمًا بين 0.2 و 4' });
+        if (typeof step.resize.scale !== 'number' || !Number.isFinite(step.resize.scale) || step.resize.scale < ENTITY_SCALE_MIN || step.resize.scale > ENTITY_SCALE_MAX) {
+          issues.push({ stepIndex: idx, field: 'resize.scale', message: SCALE_MESSAGE });
         }
       }
     }
@@ -883,8 +876,8 @@ export function validateScenario(
         if (step.construct.duration !== undefined) {
           checkDurationField(idx, 'construct.duration', step.construct.duration, false);
         }
-        if (step.construct.scale !== undefined && (typeof step.construct.scale !== 'number' || !Number.isFinite(step.construct.scale) || step.construct.scale < 0.2 || step.construct.scale > 4)) {
-          issues.push({ stepIndex: idx, field: 'construct.scale', message: 'معامل الحجم scale يجب أن يكون رقمًا بين 0.2 و 4' });
+        if (step.construct.scale !== undefined && (typeof step.construct.scale !== 'number' || !Number.isFinite(step.construct.scale) || step.construct.scale < ENTITY_SCALE_MIN || step.construct.scale > ENTITY_SCALE_MAX)) {
+          issues.push({ stepIndex: idx, field: 'construct.scale', message: SCALE_MESSAGE });
         }
       }
     }
