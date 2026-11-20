@@ -3,8 +3,7 @@ import * as yaml from 'js-yaml';
 import { Eye, EyeOff, Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
 import { ActionRecorder } from './core/actionRecorder';
 import { buildAiScenarioPrompt, generateCatalogMarkdown } from './core/catalog';
-import { clampEntityScale, clampUnitScale, TICK_RATE } from './core/constants';
-import { DT, StudioEngine } from './core/engine';
+import { DT, StudioEngine, TICK_RATE } from './core/engine';
 import { isPointNearWalkable } from './core/pathfinding';
 import {
   Faction,
@@ -199,6 +198,22 @@ export default function App() {
     }
   }, [activeTab, mapTool]);
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        pendingActionModeRef.current = 'none';
+        arrowStartPtRef.current = null;
+        setStrikeMode('none');
+        if (rendererRef.current) {
+          rendererRef.current.selectedEntityId = null;
+        }
+        setSelectedEntityId(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
     if (toastTimerRef.current !== null) {
@@ -223,50 +238,6 @@ export default function App() {
       totalSteps: eng.totalStepCount
     });
   }, []);
-
-  useEffect(() => {
-    const isInteractiveTarget = (target: EventTarget | null): boolean => {
-      if (!(target instanceof HTMLElement)) return false;
-      return Boolean(target.closest('input, textarea, select, button, a, [contenteditable="true"]'));
-    };
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        pendingActionModeRef.current = 'none';
-        arrowStartPtRef.current = null;
-        setStrikeMode('none');
-        setSpecOpen(false);
-        if (rendererRef.current) {
-          rendererRef.current.selectedEntityId = null;
-        }
-        setSelectedEntityId(null);
-        return;
-      }
-      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || isInteractiveTarget(e.target)) return;
-
-      if (e.code === 'Space') {
-        e.preventDefault();
-        setPlaying((p) => !p);
-      } else if (e.key.toLowerCase() === 'r') {
-        e.preventDefault();
-        const eng = engineRef.current;
-        if (eng) {
-          eng.reset();
-          if (rendererRef.current) {
-            rendererRef.current.selectedEntityId = null;
-            rendererRef.current.resumeCameraTracking();
-            setSelectedEntityId(null);
-          }
-          syncHudFromEngine(eng);
-        }
-      } else if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
-        e.preventDefault();
-        setSpecOpen((open) => !open);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [syncHudFromEngine]);
 
   const attachEngineListeners = useCallback(
     (eng: StudioEngine) => {
@@ -447,8 +418,6 @@ export default function App() {
           }
         }
       }
-      // The navigation overlay is cached in the renderer; repaint it on demand.
-      rendererRef.current?.invalidateNavOverlay();
     };
 
     renderer.onMapPaint = (pt: Point) => {
@@ -601,7 +570,7 @@ export default function App() {
         const spawnScale = toolScalesRef.current[actor.id] ?? 1.0;
         if (actor.kind === 'building') {
           eng.dispatchOrder({ type: 'construct', id, actorId: actor.id, at: pt, faction, durationSec: 1.8, scale: spawnScale });
-          rec.recordConstruct(id, actor.id, pt, faction, 1.8, spawnScale);
+          rec.recordConstruct(id, actIdFallback(actor.id), pt, faction, 1.8, spawnScale);
           renderer.selectedEntityId = id;
           setSelectedEntityId(id);
           setSelectedEntityScale(spawnScale);
@@ -618,119 +587,114 @@ export default function App() {
       }
     };
 
+    const actIdFallback = (id: string) => id;
+
     const boot = async () => {
-      try {
-        const reg = registryRef.current!;
-        await reg.init(PRESET_SCENARIOS);
-        await renderer.init(host);
+      const reg = registryRef.current!;
+      await reg.init(PRESET_SCENARIOS);
+      await renderer.init(host);
+      if (cancelled) return;
+
+      const savedScale = await studioDb.getSetting<number>('unitScale');
+      if (savedScale && Number.isFinite(savedScale)) {
+        renderer.userUnitScale = savedScale;
+        setUnitScale(savedScale);
+      }
+
+      const lastScenId = await studioDb.getSetting<string>('lastScenarioId');
+      const lastMapId = await studioDb.getSetting<string>('lastMapId');
+      setPackVersion((v) => v + 1);
+
+      const initialScen =
+        lastScenId !== undefined
+          ? lastScenId
+            ? reg.scenarios.find((s) => s.id === lastScenId)
+            : undefined
+          : reg.scenarios[0];
+
+      if (initialScen) {
+        setSelectedScenarioId(initialScen.id);
+        setYamlText(initialScen.yaml);
+        await loadScenario(initialScen.yaml, null, initialScen.id);
+      } else if (lastMapId && reg.maps[lastMapId]) {
+        await openEmptyMapBoard(lastMapId);
+      } else {
+        setSelectedScenarioId('preset_world');
+        setYamlText(worldYaml);
+        await loadScenario(worldYaml, null, 'preset_world');
+      }
+
+      let accumulator = 0;
+      let lastTime = performance.now();
+      let lastHudTenths = -1;
+      let lastHudCaption = '';
+      let lastHudEntities = -1;
+      let lastHudSteps = -1;
+      let lastRecTenths = -1;
+      let lastRecCount = -1;
+
+      const loop = (now: number) => {
         if (cancelled) return;
+        const frameDt = Math.min(0.1, (now - lastTime) / 1000);
+        lastTime = now;
 
-        const savedScale = await studioDb.getSetting<number>('unitScale');
-        if (savedScale && Number.isFinite(savedScale)) {
-          renderer.userUnitScale = savedScale;
-          setUnitScale(savedScale);
+        const eng = engineRef.current;
+        if (eng && playingRef.current) {
+          accumulator += frameDt * speedRef.current;
+          while (accumulator >= DT) {
+            eng.step();
+            accumulator -= DT;
+          }
         }
 
-        const lastScenId = await studioDb.getSetting<string>('lastScenarioId');
-        const lastMapId = await studioDb.getSetting<string>('lastMapId');
-        setPackVersion((v) => v + 1);
-
-        const initialScen =
-          lastScenId !== undefined
-            ? lastScenId
-              ? reg.scenarios.find((s) => s.id === lastScenId)
-              : undefined
-            : reg.scenarios[0];
-
-        if (initialScen) {
-          setSelectedScenarioId(initialScen.id);
-          setYamlText(initialScen.yaml);
-          await loadScenario(initialScen.yaml, null, initialScen.id);
-        } else if (lastMapId && reg.maps[lastMapId]) {
-          await openEmptyMapBoard(lastMapId);
-        } else {
-          setSelectedScenarioId('preset_world');
-          setYamlText(worldYaml);
-          await loadScenario(worldYaml, null, 'preset_world');
+        const rec = actionRecorderRef.current;
+        if (rec.isRecording) {
+          const recSec = rec.elapsedSec();
+          const recTenths = Math.floor(recSec * 10);
+          if (recTenths !== lastRecTenths || rec.steps.length !== lastRecCount) {
+            lastRecTenths = recTenths;
+            lastRecCount = rec.steps.length;
+            setRecStats({ clockSec: recSec, stepCount: rec.steps.length });
+          }
         }
 
-        let accumulator = 0;
-        let lastTime = performance.now();
-        let lastHudTenths = -1;
-        let lastHudCaption = '';
-        let lastHudEntities = -1;
-        let lastHudSteps = -1;
-        let lastRecTenths = -1;
-        let lastRecCount = -1;
+        if (eng) {
+          const alpha = playingRef.current ? accumulator / DT : 1;
+          renderer.render(eng, alpha, now / 1000, frameDt, playingRef.current);
 
-        const loop = (now: number) => {
-          if (cancelled) return;
-          const frameDt = Math.min(0.1, (now - lastTime) / 1000);
-          lastTime = now;
+          const simSec = eng.tick * DT;
+          const tenths = Math.floor(simSec * 10);
+          const entCount = eng.entities.size;
+          const execSteps = eng.executedStepCount;
 
-          const eng = engineRef.current;
-          if (eng && playingRef.current) {
-            accumulator += frameDt * speedRef.current;
-            while (accumulator >= DT) {
-              eng.step();
-              accumulator -= DT;
-            }
+          if (
+            tenths !== lastHudTenths ||
+            eng.caption !== lastHudCaption ||
+            entCount !== lastHudEntities ||
+            execSteps !== lastHudSteps
+          ) {
+            lastHudTenths = tenths;
+            lastHudCaption = eng.caption;
+            lastHudEntities = entCount;
+            lastHudSteps = execSteps;
+            const hasSteps = (eng.scenario.timeline?.length ?? 0) > 0;
+            const maxTicks = hasSteps ? Math.max(60, Math.ceil(eng.estimateDurationSec() * TICK_RATE)) : 600;
+            setHudState({
+              simTimeSec: simSec,
+              tick: eng.tick,
+              maxTicks,
+              caption: eng.caption,
+              entityCount: entCount,
+              executedSteps: execSteps,
+              totalSteps: eng.totalStepCount
+            });
           }
-
-          const rec = actionRecorderRef.current;
-          if (rec.isRecording) {
-            const recSec = rec.elapsedSec();
-            const recTenths = Math.floor(recSec * 10);
-            if (recTenths !== lastRecTenths || rec.steps.length !== lastRecCount) {
-              lastRecTenths = recTenths;
-              lastRecCount = rec.steps.length;
-              setRecStats({ clockSec: recSec, stepCount: rec.steps.length });
-            }
-          }
-
-          if (eng) {
-            const alpha = playingRef.current ? accumulator / DT : 1;
-            renderer.render(eng, alpha, now / 1000, frameDt, playingRef.current);
-
-            const simSec = eng.tick * DT;
-            const tenths = Math.floor(simSec * 10);
-            const entCount = eng.entities.size;
-            const execSteps = eng.executedStepCount;
-
-            if (
-              tenths !== lastHudTenths ||
-              eng.caption !== lastHudCaption ||
-              entCount !== lastHudEntities ||
-              execSteps !== lastHudSteps
-            ) {
-              lastHudTenths = tenths;
-              lastHudCaption = eng.caption;
-              lastHudEntities = entCount;
-              lastHudSteps = execSteps;
-              const hasSteps = (eng.scenario.timeline?.length ?? 0) > 0;
-              const maxTicks = hasSteps ? Math.max(60, Math.ceil(eng.estimateDurationSec() * TICK_RATE)) : 600;
-              setHudState({
-                simTimeSec: simSec,
-                tick: eng.tick,
-                maxTicks,
-                caption: eng.caption,
-                entityCount: entCount,
-                executedSteps: execSteps,
-                totalSteps: eng.totalStepCount
-              });
-            }
-          }
-
-          rafId = requestAnimationFrame(loop);
-        };
+        }
 
         rafId = requestAnimationFrame(loop);
-      } catch (err) {
-        console.error('[RW Studio] فشل تهيئة الاستوديو:', err);
-        setStatusNotice(
-          `تعذّر تهيئة الاستوديو: ${(err as Error).message}. تأكد من أن المتصفح يدعم WebGL وIndexedDB.`
-        );
-      }
+      };
+
+      rafId = requestAnimationFrame(loop);
     };
 
     void boot();
@@ -749,19 +713,18 @@ export default function App() {
   }, [enterCountryProvinces, loadScenario, openEmptyMapBoard, showToast, syncHudFromEngine]);
 
   const handleChangeUnitScale = async (nextScale: number) => {
-    const clamped = Number(clampUnitScale(nextScale).toFixed(2));
-    setUnitScale(clamped);
+    setUnitScale(nextScale);
     if (rendererRef.current) {
-      rendererRef.current.userUnitScale = clamped;
+      rendererRef.current.userUnitScale = nextScale;
     }
-    await studioDb.setSetting('unitScale', clamped);
+    await studioDb.setSetting('unitScale', nextScale);
   };
 
   const handleChangeSelectedEntityScale = (nextScale: number) => {
     const eng = engineRef.current;
     const entityId = rendererRef.current?.selectedEntityId;
     if (!eng || !entityId) return;
-    const clamped = Number(clampEntityScale(nextScale).toFixed(2));
+    const clamped = Number(Math.max(0.3, Math.min(2.8, nextScale)).toFixed(2));
     setSelectedEntityScale(clamped);
     eng.dispatchOrder({ type: 'resize', entityId, scale: clamped });
     eng.flushOrders();
@@ -769,7 +732,7 @@ export default function App() {
   };
 
   const handleChangeToolScale = (toolId: string, nextScale: number) => {
-    const clamped = Number(clampEntityScale(nextScale).toFixed(2));
+    const clamped = Number(Math.max(0.3, Math.min(2.8, nextScale)).toFixed(2));
     toolScalesRef.current = { ...toolScalesRef.current, [toolId]: clamped };
     setToolScales((prev) => ({ ...prev, [toolId]: clamped }));
   };
@@ -779,10 +742,9 @@ export default function App() {
     const eng = engineRef.current;
     const renderer = rendererRef.current;
     if (!eng || !renderer) return;
-    const mapId = eng.map.id;
-    await openEmptyMapBoard(mapId, true);
+    await openEmptyMapBoard(eng.map.id, true);
     setPlaying(true);
-    actionRecorderRef.current.start(mapId, renderer.getCameraState());
+    actionRecorderRef.current.start(eng.map.id, renderer.getCameraState());
     setPendingSaveMode(null);
     setActionRecording(true);
     setRecStats({ clockSec: 0, stepCount: actionRecorderRef.current.steps.length });
@@ -859,14 +821,7 @@ export default function App() {
     if (!selectedScenarioId) return;
     const deletedId = selectedScenarioId;
     const reg = registryRef.current!;
-    const deletedRec = reg.scenarios.find((s) => s.id === deletedId);
     await reg.deleteScenarioRecord(deletedId);
-    if (deletedRec?.source === 'preset') {
-      const previous = (await studioDb.getSetting<string[]>('deletedPresetIds')) ?? [];
-      if (!previous.includes(deletedId)) {
-        await studioDb.setSetting('deletedPresetIds', [...previous, deletedId]);
-      }
-    }
     setPackVersion((v) => v + 1);
     const nextId = reg.scenarios[0]?.id ?? '';
     setSelectedScenarioId(nextId);

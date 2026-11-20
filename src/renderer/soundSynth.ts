@@ -2,8 +2,6 @@ import { SoundId } from '../core/types';
 
 export class SoundSynth {
   private ctx: AudioContext | null = null;
-  private master: GainNode | null = null;
-  private limiter: DynamicsCompressorNode | null = null;
   private recordDest: MediaStreamAudioDestinationNode | null = null;
   private noiseBuffer: AudioBuffer | null = null;
   public muted = false;
@@ -15,23 +13,8 @@ export class SoundSynth {
     if (!AudioCtx) return null;
     if (!this.ctx) {
       this.ctx = new AudioCtx();
-
-      // Master chain: every effect goes through a gentle gain + limiter so
-      // overlapping explosions cannot clip the exported WebM audio.
-      this.master = this.ctx.createGain();
-      this.master.gain.value = 0.9;
-      this.limiter = this.ctx.createDynamicsCompressor();
-      this.limiter.threshold.value = -12;
-      this.limiter.knee.value = 6;
-      this.limiter.ratio.value = 8;
-      this.limiter.attack.value = 0.003;
-      this.limiter.release.value = 0.25;
-      this.master.connect(this.limiter);
-      this.limiter.connect(this.ctx.destination);
-
       if (typeof this.ctx.createMediaStreamDestination === 'function') {
         this.recordDest = this.ctx.createMediaStreamDestination();
-        this.limiter.connect(this.recordDest);
       }
       this.noiseBuffer = this.createNoiseBuffer(this.ctx, 1.5);
     }
@@ -53,8 +36,8 @@ export class SoundSynth {
   }
 
   private connectOutput(ctx: AudioContext, node: AudioNode): void {
-    if (this.master) node.connect(this.master);
-    else node.connect(ctx.destination);
+    node.connect(ctx.destination);
+    if (this.recordDest) node.connect(this.recordDest);
   }
 
   getAudioStream(): MediaStream | null {
