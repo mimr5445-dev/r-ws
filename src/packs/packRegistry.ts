@@ -4,6 +4,9 @@ import { studioDb } from '../storage/studioDb';
 import { DEMO_ACTORS, DEMO_MAPS, TEMPLATES } from './demoPacks';
 import { validatePackBundle } from './packSchema';
 
+const RETIRED_MAP_IDS = new Set(['geopolitics_strait', 'tactical_valley']);
+const RETIRED_SCENARIO_IDS = new Set(['preset_air_sea', 'preset_world', 'preset_strait', 'preset_valley']);
+
 export const ACTOR_TEMPLATES: Record<string, ActorTemplate> = TEMPLATES;
 
 export class PackRegistry {
@@ -43,13 +46,16 @@ export class PackRegistry {
     const savedMaps = await studioDb.loadAllMaps();
     for (const m of savedMaps) {
       // تحديث خريطة العالم من النسخة الحية مع الاحتفاظ بالخرائط المخصصة والدول المحفوظة
-      if (m.id !== 'world_live') this.maps[m.id] = m;
+      if (m.id !== 'world_live' && !RETIRED_MAP_IDS.has(m.id)) this.maps[m.id] = m;
     }
 
     const savedActors = await studioDb.loadAllActors();
     for (const a of savedActors) this.applyActor(a);
 
-    const savedScenarios = await studioDb.loadAllScenarios();
+    for (const id of RETIRED_SCENARIO_IDS) {
+      await studioDb.deleteScenario(id);
+    }
+    const savedScenarios = (await studioDb.loadAllScenarios()).filter((s) => !RETIRED_SCENARIO_IDS.has(s.id));
     const existingIds = new Set(savedScenarios.map((s) => s.id));
     for (const p of presetScenarios) {
       if (!existingIds.has(p.id)) {

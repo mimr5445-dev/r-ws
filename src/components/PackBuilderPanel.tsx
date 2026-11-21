@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { Download, FileUp, ImagePlus, MapPin, Paintbrush, Play, Shapes } from 'lucide-react';
 import { MapPack } from '../core/types';
 
-export type MapEditTool = 'anchor' | 'zone' | 'paint_land' | 'paint_sea' | 'paint_block';
+export type MapEditTool = 'anchor' | 'zone';
 
 interface PackBuilderPanelProps {
   maps: Record<string, MapPack>;
@@ -37,9 +37,6 @@ interface PackBuilderPanelProps {
 const MAP_TOOLS: Array<{ id: MapEditTool; label: string }> = [
   { id: 'anchor', label: '+ مرسى (Anchor)' },
   { id: 'zone', label: '+ منطقة (Zone)' },
-  { id: 'paint_land', label: 'فرشاة يابسة' },
-  { id: 'paint_sea', label: 'فرشاة بحر' },
-  { id: 'paint_block', label: 'فرشاة عائق' }
 ];
 
 export function PackBuilderPanel({
