@@ -22,422 +22,146 @@ function defineActor(
 }
 
 export const DEMO_ACTORS: Record<string, ActorPack> = {
-  diplomat_person: defineActor(
-    'diplomat_person',
-    'مبعوث / شخصية',
-    '_person',
-    { speed: 56, scale: 36, radius: 14 },
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72">
-      <defs>
-        <linearGradient id="suitG" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#1e293b"/>
-          <stop offset="100%" stop-color="#0f172a"/>
-        </linearGradient>
-      </defs>
-      <circle cx="36" cy="20" r="9.5" fill="#f3d1a4" stroke="#090f1a" stroke-width="2.2"/>
-      <path d="M27.5 17 C29 10 43 10 44.5 17 C41 14.5 31 14.5 27.5 17 Z" fill="#1e293b"/>
-      <path d="M19 56 C19 37 25 32 36 32 C47 32 53 37 53 56 Z" fill="url(#suitG)" stroke="#090f1a" stroke-width="2.2" stroke-linejoin="round"/>
-      <polygon points="31,32 36,44 41,32" fill="#f8fafc"/>
-      <polygon points="34.5,33 36,44 37.5,33" fill="#dc2626"/>
-      <path d="M28 33 L33 44 M44 33 L39 44" stroke="#475569" stroke-width="1.6"/>
-      <rect x="46" y="46" width="12" height="9" rx="1.5" fill="#78350f" stroke="#090f1a" stroke-width="1.6"/>
-      <rect x="50" y="43.5" width="4" height="2.5" fill="none" stroke="#d97706" stroke-width="1.2"/>
-    </svg>`
+  heavy_tank: defineActor(
+    'heavy_tank',
+    'دبابة قتال رئيسية',
+    '_vehicle',
+    { speed: 70, scale: 40, radius: 20 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="tk-hull" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2f3d25"/><stop offset=".5" stop-color="#5d7046"/><stop offset="1" stop-color="#2f3d25"/></linearGradient><linearGradient id="tk-trk" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1a1d1f"/><stop offset="1" stop-color="#3a3f44"/></linearGradient><radialGradient id="tk-tur" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#8ea173"/><stop offset="1" stop-color="#4b5d3a"/></radialGradient></defs><ellipse cx="52" cy="53" rx="32" ry="38" fill="#000" opacity=".32"/><rect x="20" y="12" width="13" height="72" rx="4" fill="url(#tk-trk)" stroke="#0a0f1a" stroke-width="2.2"/><rect x="63" y="12" width="13" height="72" rx="4" fill="url(#tk-trk)" stroke="#0a0f1a" stroke-width="2.2"/><path d="M22 20H31M22 30H31M22 40H31M22 50H31M22 60H31M22 70H31M65 20H74M65 30H74M65 40H74M65 50H74M65 60H74M65 70H74" stroke="#0a0f1a" stroke-width="1.1" opacity=".6"/><path d="M30 14 L66 14 L70 24 L70 78 L26 78 L26 24 Z" fill="url(#tk-hull)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M32 16 L64 16 L66 24 L30 24 Z" fill="#c7d2a3" opacity=".45"/><rect x="36" y="74" width="24" height="5" rx="1" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><path d="M30 60 q6 -6 12 -2 q4 4 0 10 q-8 4 -12 -2 Z" fill="#8a7447" opacity=".7"/><path d="M56 30 q7 -2 9 6 q-2 6 -9 4 Z" fill="#3e4a30" opacity=".7"/><circle cx="48" cy="48" r="13" fill="url(#tk-tur)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><rect x="45.5" y="8" width="5" height="36" rx="1.5" fill="#2b3024" stroke="#0a0f1a" stroke-width="1.6"/><rect x="43.5" y="6" width="9" height="5" rx="1" fill="#1a1d1f"/><circle cx="45" cy="44" r="3.2" fill="#3f4a33" stroke="#0a0f1a" stroke-width="1"/></svg>`
   ),
   infantry_squad: defineActor(
     'infantry_squad',
     'فصيل مشاة',
     '_person',
-    { speed: 65, scale: 38, radius: 15 },
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72">
-      <!-- 3-soldier tactical fireteam -->
-      <g stroke="#090f1a" stroke-width="1.8">
-        <!-- Rear Left -->
-        <ellipse cx="22" cy="48" rx="9.5" ry="6.5" fill="#3f6212"/>
-        <circle cx="22" cy="47" r="6" fill="#4d7c0f"/>
-        <path d="M18 45 L26 45" stroke="#65a30d" stroke-width="1.2"/>
-        <line x1="26" y1="45" x2="33" y2="38" stroke="#1e293b" stroke-width="2.4" stroke-linecap="round"/>
-        <!-- Rear Right -->
-        <ellipse cx="50" cy="48" rx="9.5" ry="6.5" fill="#3f6212"/>
-        <circle cx="50" cy="47" r="6" fill="#4d7c0f"/>
-        <path d="M46 45 L54 45" stroke="#65a30d" stroke-width="1.2"/>
-        <line x1="54" y1="45" x2="61" y2="38" stroke="#1e293b" stroke-width="2.4" stroke-linecap="round"/>
-        <!-- Point Soldier -->
-        <ellipse cx="36" cy="26" rx="10.5" ry="7" fill="#365314"/>
-        <circle cx="36" cy="25" r="6.8" fill="#65a30d"/>
-        <rect x="31" y="21" width="10" height="3" rx="1" fill="#1e293b" stroke="none"/>
-        <line x1="40" y1="24" x2="52" y2="17" stroke="#0f172a" stroke-width="2.8" stroke-linecap="round"/>
-      </g>
-    </svg>`
+    { speed: 60, scale: 38, radius: 15 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><radialGradient id="inf-h" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#8ea173"/><stop offset="1" stop-color="#3f4f2d"/></radialGradient></defs><g transform="translate(48 48) scale(1.5) translate(-48 -48)"><ellipse cx="26" cy="33" rx="9" ry="6.5" fill="#000" opacity=".3"/><line x1="26" y1="28" x2="33" y2="16" stroke="#1f2937" stroke-width="2.4" stroke-linecap="round"/><ellipse cx="24" cy="30" rx="8" ry="6" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><circle cx="24" cy="29" r="4.6" fill="url(#inf-h)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M20 31 L28 31" stroke="#2f3d25" stroke-width="1.4"/><ellipse cx="52" cy="25" rx="9" ry="6.5" fill="#000" opacity=".3"/><line x1="52" y1="20" x2="59" y2="8" stroke="#1f2937" stroke-width="2.4" stroke-linecap="round"/><ellipse cx="50" cy="22" rx="8" ry="6" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><circle cx="50" cy="21" r="4.6" fill="url(#inf-h)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M46 23 L54 23" stroke="#2f3d25" stroke-width="1.4"/><ellipse cx="72" cy="41" rx="9" ry="6.5" fill="#000" opacity=".3"/><line x1="72" y1="36" x2="79" y2="24" stroke="#1f2937" stroke-width="2.4" stroke-linecap="round"/><ellipse cx="70" cy="38" rx="8" ry="6" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><circle cx="70" cy="37" r="4.6" fill="url(#inf-h)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M66 39 L74 39" stroke="#2f3d25" stroke-width="1.4"/><ellipse cx="36" cy="63" rx="9" ry="6.5" fill="#000" opacity=".3"/><line x1="36" y1="58" x2="43" y2="46" stroke="#1f2937" stroke-width="2.4" stroke-linecap="round"/><ellipse cx="34" cy="60" rx="8" ry="6" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><circle cx="34" cy="59" r="4.6" fill="url(#inf-h)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M30 61 L38 61" stroke="#2f3d25" stroke-width="1.4"/><ellipse cx="64" cy="69" rx="9" ry="6.5" fill="#000" opacity=".3"/><line x1="64" y1="64" x2="71" y2="52" stroke="#1f2937" stroke-width="2.4" stroke-linecap="round"/><ellipse cx="62" cy="66" rx="8" ry="6" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><circle cx="62" cy="65" r="4.6" fill="url(#inf-h)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M58 67 L66 67" stroke="#2f3d25" stroke-width="1.4"/></g></svg>`
   ),
-  heavy_tank: defineActor(
-    'heavy_tank',
-    'دبابة قتال ثقيلة',
+  apc_armored: defineActor(
+    'apc_armored',
+    'ناقلة جند مدرعة',
     '_vehicle',
-    { speed: 80, turnRate: 2.6, scale: 46, radius: 21 },
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
-      <defs>
-        <linearGradient id="tankHull" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stop-color="#3f4a3c"/>
-          <stop offset="60%" stop-color="#53614d"/>
-          <stop offset="100%" stop-color="#44503f"/>
-        </linearGradient>
-        <linearGradient id="tankTurret" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="#6b7a62"/>
-          <stop offset="100%" stop-color="#465241"/>
-        </linearGradient>
-      </defs>
-      <!-- Track assemblies -->
-      <rect x="10" y="15" width="52" height="10" rx="2.5" fill="#1e293b" stroke="#090f1a" stroke-width="2"/>
-      <rect x="10" y="55" width="52" height="10" rx="2.5" fill="#1e293b" stroke="#090f1a" stroke-width="2"/>
-      <path d="M15 15 V25 M23 15 V25 M31 15 V25 M39 15 V25 M47 15 V25 M55 15 V25 M15 55 V65 M23 55 V65 M31 55 V65 M39 55 V65 M47 55 V65 M55 55 V65" stroke="#0f172a" stroke-width="1.3"/>
-      <!-- Hull & side skirts -->
-      <rect x="12" y="21" width="49" height="38" rx="3" fill="url(#tankHull)" stroke="#090f1a" stroke-width="2"/>
-      <!-- Engine deck grilles -->
-      <rect x="14" y="25" width="12" height="30" rx="1.5" fill="#2b3329" stroke="#1e293b" stroke-width="1"/>
-      <line x1="17" y1="26" x2="17" y2="54" stroke="#475569" stroke-width="1"/>
-      <line x1="20" y1="26" x2="20" y2="54" stroke="#475569" stroke-width="1"/>
-      <line x1="23" y1="26" x2="23" y2="54" stroke="#475569" stroke-width="1"/>
-      <!-- Front composite glacis & lights -->
-      <polygon points="50,22 61,25 61,55 50,58" fill="#5c6b55" stroke="#1e293b" stroke-width="1"/>
-      <rect x="58" y="23" width="3" height="4" fill="#fef08a"/>
-      <rect x="58" y="53" width="3" height="4" fill="#fef08a"/>
-      <!-- 120mm Smoothbore barrel & bore evacuator -->
-      <rect x="44" y="38" width="34" height="4" rx="1" fill="#64748b" stroke="#090f1a" stroke-width="1.5"/>
-      <rect x="55" y="36.8" width="7" height="6.4" rx="1.5" fill="#788573" stroke="#090f1a" stroke-width="1.3"/>
-      <rect x="75" y="37.4" width="3" height="5.2" fill="#334155"/>
-      <!-- Wedge Turret -->
-      <polygon points="18,28 36,24 51,32 51,48 36,56 18,52" fill="url(#tankTurret)" stroke="#090f1a" stroke-width="2" stroke-linejoin="round"/>
-      <!-- Bustle rack & Optics -->
-      <rect x="18" y="30" width="7" height="20" fill="#3b4537" stroke="#1e293b" stroke-width="1"/>
-      <circle cx="35" cy="34" r="4.5" fill="#3f4a3c" stroke="#090f1a" stroke-width="1.4"/>
-      <circle cx="35" cy="46" r="3.5" fill="#3f4a3c" stroke="#090f1a" stroke-width="1.4"/>
-      <rect x="42" y="31" width="4" height="3.5" fill="#38bdf8"/>
-    </svg>`
+    { speed: 90, scale: 42, radius: 20 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="ap-hull" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3b4a2e"/><stop offset=".5" stop-color="#65794f"/><stop offset="1" stop-color="#3b4a2e"/></linearGradient><radialGradient id="tk-tur" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#8ea173"/><stop offset="1" stop-color="#4b5d3a"/></radialGradient></defs><ellipse cx="52" cy="53" rx="32" ry="38" fill="#000" opacity=".32"/><rect x="20" y="14" width="8" height="12" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="20" y="30" width="8" height="12" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="20" y="52" width="8" height="12" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="20" y="68" width="8" height="12" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="68" y="14" width="8" height="12" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="68" y="30" width="8" height="12" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="68" y="52" width="8" height="12" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="68" y="68" width="8" height="12" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="30" y="10" width="36" height="76" rx="10" fill="url(#ap-hull)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><rect x="36" y="20" width="24" height="7" rx="2" fill="#1e293b" opacity=".85"/><rect x="36" y="66" width="24" height="7" rx="2" fill="#1e293b" opacity=".85"/><circle cx="48" cy="44" r="9" fill="url(#tk-tur)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><rect x="46" y="22" width="4" height="16" rx="1.2" fill="#2b3024" stroke="#0a0f1a" stroke-width="1.2"/><path d="M32 14 L64 14" stroke="#c7d2a3" stroke-width="1" opacity=".5"/></svg>`
+  ),
+  sam_battery: defineActor(
+    'sam_battery',
+    'بطارية دفاع جوي',
+    '_vehicle',
+    { speed: 60, scale: 44, radius: 21 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="sm-body" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2f3d25"/><stop offset=".5" stop-color="#5d7046"/><stop offset="1" stop-color="#2f3d25"/></linearGradient></defs><ellipse cx="52" cy="53" rx="32" ry="38" fill="#000" opacity=".32"/><rect x="22" y="16" width="7" height="11" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="22" y="62" width="7" height="11" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="67" y="16" width="7" height="11" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="67" y="62" width="7" height="11" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="28" y="12" width="40" height="72" rx="6" fill="url(#sm-body)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><rect x="34" y="14" width="28" height="12" rx="3" fill="#3b4a2e" stroke="#0a0f1a" stroke-width="1.2"/><rect x="37" y="16" width="22" height="7" rx="1.5" fill="#60a5fa" opacity=".45"/><rect x="34" y="34" width="28" height="36" rx="3" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><rect x="38" y="40" width="6" height="22" rx="3" fill="#e5e7eb" stroke="#0a0f1a" stroke-width="1.2"/><circle cx="41" cy="41.5" r="2.4" fill="#dc2626"/><rect x="52" y="40" width="6" height="22" rx="3" fill="#e5e7eb" stroke="#0a0f1a" stroke-width="1.2"/><circle cx="55" cy="41.5" r="2.4" fill="#dc2626"/><circle cx="48" cy="72" r="5" fill="#3b4a2e" stroke="#0a0f1a" stroke-width="1.2"/></svg>`
   ),
   ballistic_launcher: defineActor(
     'ballistic_launcher',
-    'منظومة صواريخ بالستية',
+    'منصة صواريخ باليستية',
     '_vehicle',
-    { speed: 62, turnRate: 2.0, scale: 54, radius: 24 },
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 64">
-      <defs>
-        <linearGradient id="telChassis" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stop-color="#374151"/>
-          <stop offset="100%" stop-color="#4b5563"/>
-        </linearGradient>
-        <linearGradient id="missileBody" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#f1f5f9"/>
-          <stop offset="50%" stop-color="#cbd5e1"/>
-          <stop offset="100%" stop-color="#64748b"/>
-        </linearGradient>
-      </defs>
-      <!-- 8x8 Heavy off-road tires -->
-      <g fill="#0f172a" stroke="#020617" stroke-width="1.2">
-        <rect x="10" y="9" width="12" height="5" rx="1.5"/><rect x="27" y="9" width="12" height="5" rx="1.5"/>
-        <rect x="46" y="9" width="12" height="5" rx="1.5"/><rect x="65" y="9" width="12" height="5" rx="1.5"/>
-        <rect x="10" y="50" width="12" height="5" rx="1.5"/><rect x="27" y="50" width="12" height="5" rx="1.5"/>
-        <rect x="46" y="50" width="12" height="5" rx="1.5"/><rect x="65" y="50" width="12" height="5" rx="1.5"/>
-      </g>
-      <!-- 8x8 Chassis Frame -->
-      <rect x="8" y="13" width="76" height="38" rx="4" fill="url(#telChassis)" stroke="#090f1a" stroke-width="2.2"/>
-      <!-- Twin Forward Armored Cab -->
-      <rect x="64" y="15" width="18" height="14" rx="2" fill="#525f50" stroke="#090f1a" stroke-width="1.5"/>
-      <rect x="64" y="35" width="18" height="14" rx="2" fill="#525f50" stroke="#090f1a" stroke-width="1.5"/>
-      <rect x="75" y="17" width="4" height="10" rx="1" fill="#38bdf8"/>
-      <rect x="75" y="37" width="4" height="10" rx="1" fill="#38bdf8"/>
-      <!-- Erector Cradle -->
-      <rect x="12" y="21" width="54" height="22" rx="3" fill="#1e293b" stroke="#090f1a" stroke-width="1.5"/>
-      <!-- Ballistic Missile Silhouette mounted on TEL -->
-      <polygon points="10,21 18,24 18,40 10,43 13,32" fill="#475569" stroke="#090f1a" stroke-width="1.2"/>
-      <rect x="14" y="25" width="54" height="14" rx="2" fill="url(#missileBody)" stroke="#090f1a" stroke-width="1.6"/>
-      <rect x="34" y="25" width="4" height="14" fill="#334155"/>
-      <rect x="52" y="25" width="3" height="14" fill="#ef4444"/>
-      <path d="M68 25 L86 32 L68 39 Z" fill="#dc2626" stroke="#090f1a" stroke-width="1.5" stroke-linejoin="round"/>
-      <line x1="22" y1="32" x2="64" y2="32" stroke="#94a3b8" stroke-width="1" opacity="0.65"/>
-    </svg>`
+    { speed: 55, scale: 46, radius: 22 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="bl-body" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2f3d25"/><stop offset=".5" stop-color="#5d7046"/><stop offset="1" stop-color="#2f3d25"/></linearGradient><linearGradient id="bl-msl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#cbd5e1"/><stop offset=".5" stop-color="#f1f5f9"/><stop offset="1" stop-color="#94a3b8"/></linearGradient></defs><ellipse cx="52" cy="53" rx="32" ry="38" fill="#000" opacity=".32"/><rect x="20" y="16" width="8" height="12" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="20" y="30" width="8" height="12" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="20" y="62" width="8" height="12" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="20" y="76" width="8" height="12" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="68" y="16" width="8" height="12" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="68" y="30" width="8" height="12" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="68" y="62" width="8" height="12" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="68" y="76" width="8" height="12" rx="2" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><rect x="32" y="18" width="32" height="60" rx="5" fill="url(#bl-body)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M40 88 L48 96 L56 88 Z" fill="#94a3b8" opacity="0"/><rect x="41" y="8" width="14" height="82" rx="6" fill="url(#bl-msl)" stroke="#0a0f1a" stroke-width="1.8"/><path d="M41 14 Q48 2 55 14 Z" fill="#f8fafc" stroke="#0a0f1a" stroke-width="1.4"/><rect x="41" y="20" width="14" height="3" fill="#dc2626"/><path d="M41 80 L34 90 L41 88 Z M55 80 L62 90 L55 88 Z" fill="#64748b" stroke="#0a0f1a" stroke-width="1"/><rect x="44" y="60" width="8" height="10" rx="1" fill="#1e293b" opacity=".6"/></svg>`
   ),
-  fighter_jet: defineActor(
-    'fighter_jet',
-    'مقاتلة حربية',
-    '_air',
-    { speed: 225, turnRate: 3.3, scale: 50, radius: 22 },
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
-      <defs>
-        <linearGradient id="jetWing" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="#94a3b8"/>
-          <stop offset="55%" stop-color="#64748b"/>
-          <stop offset="100%" stop-color="#475569"/>
-        </linearGradient>
-        <linearGradient id="canopyG" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stop-color="#0284c7"/>
-          <stop offset="55%" stop-color="#7dd3fc"/>
-          <stop offset="100%" stop-color="#fef08a"/>
-        </linearGradient>
-      </defs>
-      <!-- Underwing air-to-air missiles -->
-      <rect x="29" y="13" width="14" height="2" rx="1" fill="#e2e8f0" stroke="#0f172a" stroke-width="0.7"/>
-      <rect x="29" y="65" width="14" height="2" rx="1" fill="#e2e8f0" stroke="#0f172a" stroke-width="0.7"/>
-      <!-- Main swept wings + intake strakes + horizontal tails -->
-      <polygon points="75,40 58,34 45,32 28,9 21,9 26,31 15,28 8,16 3,16 7,33 10,36 10,44 7,47 3,64 8,64 15,52 26,49 21,71 28,71 45,48 58,46" fill="url(#jetWing)" stroke="#090f1a" stroke-width="2" stroke-linejoin="round"/>
-      <!-- Panel lines & LERX shading -->
-      <polygon points="56,35 30,14 27,32 45,36" fill="#475569" opacity="0.45"/>
-      <polygon points="56,45 30,66 27,48 45,44" fill="#334155" opacity="0.45"/>
-      <!-- Twin canted vertical stabilizers -->
-      <polygon points="20,30 8,24 10,33 22,35" fill="#334155" stroke="#090f1a" stroke-width="1.2"/>
-      <polygon points="20,50 8,56 10,47 22,45" fill="#334155" stroke="#090f1a" stroke-width="1.2"/>
-      <!-- Twin afterburner nozzles -->
-      <rect x="7" y="34.5" width="6" height="4.5" rx="1" fill="#1e293b" stroke="#090f1a" stroke-width="1"/>
-      <rect x="7" y="41" width="6" height="4.5" rx="1" fill="#1e293b" stroke="#090f1a" stroke-width="1"/>
-      <circle cx="7.5" cy="36.8" r="1.8" fill="#f97316"/>
-      <circle cx="7.5" cy="43.2" r="1.8" fill="#f97316"/>
-      <!-- Nose radome & Bubble canopy -->
-      <path d="M62 37 L74 40 L62 43 Z" fill="#334155"/>
-      <ellipse cx="52" cy="40" rx="10" ry="3.4" fill="url(#canopyG)" stroke="#090f1a" stroke-width="1.4"/>
-      <line x1="22" y1="40" x2="41" y2="40" stroke="#cbd5e1" stroke-width="1.1" opacity="0.7"/>
-    </svg>`
-  ),
-  stealth_bomber: defineActor(
-    'stealth_bomber',
-    'قاذفة استراتيجية',
-    '_air',
-    { speed: 175, turnRate: 2.2, scale: 62, radius: 27 },
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 88 88">
-      <defs>
-        <linearGradient id="b2Skin" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="#3f4756"/>
-          <stop offset="50%" stop-color="#27303f"/>
-          <stop offset="100%" stop-color="#171d28"/>
-        </linearGradient>
-      </defs>
-      <!-- B-2 Spirit flying-wing with authentic W-sawtooth trailing edge -->
-      <polygon points="74,44 33,6 21,16 32,29 20,38 30,44 20,50 32,59 21,72 33,82" fill="url(#b2Skin)" stroke="#090f1a" stroke-width="2.4" stroke-linejoin="round"/>
-      <!-- Center fuselage blending & engine nacelles -->
-      <polygon points="64,44 42,32 30,44 42,56" fill="#334155" opacity="0.75"/>
-      <polygon points="48,34 33,26 28,31 44,37" fill="#0f172a" opacity="0.8"/>
-      <polygon points="48,54 33,62 28,57 44,51" fill="#0f172a" opacity="0.8"/>
-      <!-- Split stealth windshield -->
-      <polygon points="61,44 55,39 51,41 55,44 51,47 55,49" fill="#38bdf8" stroke="#090f1a" stroke-width="1.1"/>
-      <!-- Low-observable radar seams -->
-      <path d="M50 22 L38 40 M50 66 L38 48" stroke="#475569" stroke-width="1" opacity="0.55"/>
-    </svg>`
-  ),
-  attack_heli: defineActor(
-    'attack_heli',
-    'مروحية هجومية',
-    '_heli',
-    { speed: 145, turnRate: 3.8, scale: 50, radius: 22 },
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
-      <defs>
-        <linearGradient id="heliBody" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stop-color="#374151"/>
-          <stop offset="100%" stop-color="#4b5563"/>
-        </linearGradient>
-      </defs>
-      <!-- Tail boom & horizontal stabilizer -->
-      <polygon points="10,37.5 34,36 34,44 10,42.5" fill="#3f4a3c" stroke="#090f1a" stroke-width="1.8"/>
-      <rect x="8" y="30" width="5" height="20" rx="1.5" fill="#334155" stroke="#090f1a" stroke-width="1.4"/>
-      <rect x="4" y="38.5" width="7" height="3" fill="#94a3b8"/>
-      <!-- Stub wings + Hellfire & rocket pods -->
-      <polygon points="40,17 48,19 48,61 40,63 36,56 36,24" fill="#465241" stroke="#090f1a" stroke-width="1.8"/>
-      <rect x="40" y="16" width="11" height="4" rx="1.5" fill="#1e293b" stroke="#090f1a" stroke-width="1"/>
-      <rect x="40" y="60" width="11" height="4" rx="1.5" fill="#1e293b" stroke="#090f1a" stroke-width="1"/>
-      <rect x="42" y="23" width="9" height="4" rx="1" fill="#334155"/>
-      <rect x="42" y="53" width="9" height="4" rx="1" fill="#334155"/>
-      <!-- Slender fuselage & twin engine pods -->
-      <ellipse cx="44" cy="34.5" rx="9" ry="3.2" fill="#334155" stroke="#090f1a" stroke-width="1.3"/>
-      <ellipse cx="44" cy="45.5" rx="9" ry="3.2" fill="#334155" stroke="#090f1a" stroke-width="1.3"/>
-      <path d="M29 36 C36 33 58 33 67 40 C58 47 36 47 29 44 Z" fill="url(#heliBody)" stroke="#090f1a" stroke-width="2"/>
-      <!-- Tandem canopy + Nose FLIR sensor & 30mm chain gun -->
-      <ellipse cx="56" cy="40" rx="7.5" ry="3.2" fill="#38bdf8" stroke="#090f1a" stroke-width="1.2"/>
-      <circle cx="67.5" cy="40" r="2.6" fill="#1e293b" stroke="#64748b" stroke-width="1"/>
-      <circle cx="40" cy="40" r="3.2" fill="#1e293b" stroke="#cbd5e1" stroke-width="1.2"/>
-    </svg>`
-  ),
-  naval_corvette: defineActor(
-    'naval_corvette',
-    'فرقاطة بحرية',
-    '_ship',
-    { speed: 85, turnRate: 1.7, scale: 58, radius: 24 },
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 48">
-      <defs>
-        <linearGradient id="corvHull" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stop-color="#475569"/>
-          <stop offset="100%" stop-color="#94a3b8"/>
-        </linearGradient>
-      </defs>
-      <!-- Faceted stealth hull -->
-      <polygon points="7,17 58,11 91,24 58,37 7,31" fill="url(#corvHull)" stroke="#090f1a" stroke-width="2.2" stroke-linejoin="round"/>
-      <polygon points="10,19 56,14 84,24 56,34 10,29" fill="#64748b" opacity="0.5"/>
-      <!-- Aft flight deck -->
-      <rect x="11" y="18" width="16" height="12" rx="1" fill="#334155" stroke="#1e293b" stroke-width="1"/>
-      <circle cx="19" cy="24" r="3.6" fill="none" stroke="#fef08a" stroke-width="1"/>
-      <!-- Stealth bridge superstructure & mast -->
-      <polygon points="32,16 56,17 62,24 56,31 32,32" fill="#475569" stroke="#090f1a" stroke-width="1.6"/>
-      <rect x="44" y="19" width="7" height="10" rx="1" fill="#38bdf8" opacity="0.8"/>
-      <line x1="40" y1="15" x2="40" y2="33" stroke="#e2e8f0" stroke-width="1.6"/>
-      <!-- 57mm Stealth Bow Cannon -->
-      <polygon points="69,21 76,22 76,26 69,27" fill="#cbd5e1" stroke="#090f1a" stroke-width="1.2"/>
-      <line x1="76" y1="24" x2="84" y2="24" stroke="#0f172a" stroke-width="2"/>
-    </svg>`
+  artillery_howitzer: defineActor(
+    'artillery_howitzer',
+    'مدفعية هاوتزر ذاتية الحركة',
+    '_vehicle',
+    { speed: 50, scale: 42, radius: 20 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="tk-hull" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2f3d25"/><stop offset=".5" stop-color="#5d7046"/><stop offset="1" stop-color="#2f3d25"/></linearGradient><linearGradient id="tk-trk" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1a1d1f"/><stop offset="1" stop-color="#3a3f44"/></linearGradient><radialGradient id="tk-tur" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#8ea173"/><stop offset="1" stop-color="#4b5d3a"/></radialGradient></defs><ellipse cx="52" cy="53" rx="32" ry="38" fill="#000" opacity=".32"/><rect x="18" y="14" width="13" height="68" rx="4" fill="url(#tk-trk)" stroke="#0a0f1a" stroke-width="2"/><rect x="65" y="14" width="13" height="68" rx="4" fill="url(#tk-trk)" stroke="#0a0f1a" stroke-width="2"/><path d="M18 26L8 34M18 70L8 62M78 26L88 34M78 70L88 62" stroke="#0a0f1a" stroke-width="3" stroke-linecap="round"/><rect x="28" y="12" width="40" height="72" rx="6" fill="url(#tk-hull)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><circle cx="48" cy="50" r="12" fill="url(#tk-tur)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><rect x="45" y="2" width="6" height="42" rx="2" fill="#2b3024" stroke="#0a0f1a" stroke-width="1.6"/><rect x="42.5" y="0" width="11" height="5" rx="1" fill="#1a1d1f"/><circle cx="48" cy="50" r="3" fill="#3f4a33"/></svg>`
   ),
   destroyer_ship: defineActor(
     'destroyer_ship',
-    'مدمرة صواريخ',
+    'مدمرة',
     '_ship',
-    { speed: 78, turnRate: 1.4, scale: 70, radius: 28 },
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112 52">
-      <defs>
-        <linearGradient id="ddgHull" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stop-color="#334155"/>
-          <stop offset="55%" stop-color="#475569"/>
-          <stop offset="100%" stop-color="#64748b"/>
-        </linearGradient>
-      </defs>
-      <!-- Arleigh-Burke style steel hull -->
-      <path d="M5 17 L64 10 L108 26 L64 42 L5 35 Z" fill="url(#ddgHull)" stroke="#090f1a" stroke-width="2.4" stroke-linejoin="round"/>
-      <!-- Flight deck & Helipad -->
-      <rect x="8" y="18" width="21" height="16" rx="1.5" fill="#1e293b" stroke="#475569" stroke-width="1"/>
-      <circle cx="18" cy="26" r="5" fill="none" stroke="#fef08a" stroke-width="1.2" stroke-dasharray="3 2"/>
-      <line x1="8" y1="26" x2="29" y2="26" stroke="#e2e8f0" stroke-width="0.8" opacity="0.5"/>
-      <!-- Aft Hangar + Exhaust Stacks + AEGIS Deckhouse -->
-      <rect x="30" y="16" width="14" height="20" rx="1.5" fill="#475569" stroke="#090f1a" stroke-width="1.5"/>
-      <rect x="46" y="17" width="8" height="18" rx="1.5" fill="#334155" stroke="#090f1a" stroke-width="1.4"/>
-      <circle cx="50" cy="22" r="2.2" fill="#0f172a"/><circle cx="50" cy="30" r="2.2" fill="#0f172a"/>
-      <polygon points="56,15 74,17 77,26 74,35 56,37" fill="#64748b" stroke="#090f1a" stroke-width="1.6"/>
-      <rect x="64" y="19" width="7" height="14" rx="1" fill="#38bdf8" opacity="0.85"/>
-      <!-- Forward Mk-41 VLS Cell Grid -->
-      <rect x="79" y="19" width="11" height="14" rx="1" fill="#334155" stroke="#090f1a" stroke-width="1.3"/>
-      <path d="M82.5 19 V33 M86.5 19 V33 M79 23.5 H90 M79 28.5 H90" stroke="#94a3b8" stroke-width="0.9"/>
-      <!-- 5-inch Naval Bow Gun -->
-      <circle cx="95" cy="26" r="3.4" fill="#cbd5e1" stroke="#090f1a" stroke-width="1.4"/>
-      <line x1="98" y1="26" x2="105" y2="26" stroke="#0f172a" stroke-width="2.2" stroke-linecap="round"/>
-    </svg>`
+    { speed: 78, scale: 56, radius: 24 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="sh-hull" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3f4b5c"/><stop offset=".5" stop-color="#7b8798"/><stop offset="1" stop-color="#3f4b5c"/></linearGradient></defs><path d="M48 4 L60 18 L63 80 L56 92 L40 92 L33 80 L36 18 Z" fill="#000" opacity=".3" transform="translate(3 4)"/><path d="M48 4 L60 18 L63 80 L56 92 L40 92 L33 80 L36 18 Z" fill="url(#sh-hull)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><rect x="42" y="40" width="12" height="22" rx="2" fill="#94a3b8" stroke="#0a0f1a" stroke-width="1.4"/><rect x="44" y="34" width="8" height="8" rx="1" fill="#e2e8f0" stroke="#0a0f1a" stroke-width="1"/><line x1="48" y1="30" x2="48" y2="40" stroke="#0a0f1a" stroke-width="1.4"/><circle cx="48" cy="22" r="4.5" fill="#334155" stroke="#0a0f1a" stroke-width="1.4"/><rect x="46" y="14" width="4" height="8" fill="#1e293b"/><circle cx="48" cy="80" r="4.5" fill="#334155" stroke="#0a0f1a" stroke-width="1.4"/><rect x="46.5" y="84" width="3" height="7" fill="#1e293b"/><rect x="38" y="56" width="6" height="6" fill="#1e293b"/><rect x="52" y="56" width="6" height="6" fill="#1e293b"/><rect x="38" y="66" width="6" height="6" fill="#1e293b"/><rect x="52" y="66" width="6" height="6" fill="#1e293b"/><circle cx="48" cy="66" r="3" fill="#dc2626" opacity=".5"/><path d="M42 16 L48 4" stroke="#f8fafc" stroke-width="1" opacity=".5"/><path d="M46 88 Q48 96 44 100 M52 88 Q50 96 54 100" stroke="#e2e8f0" stroke-width="1.2" fill="none" opacity=".35"/></svg>`
   ),
   aircraft_carrier: defineActor(
     'aircraft_carrier',
     'حاملة طائرات',
     '_carrier',
-    { speed: 52, turnRate: 0.9, scale: 98, radius: 40 },
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 76">
-      <defs>
-        <linearGradient id="cvDeck" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stop-color="#1e293b"/>
-          <stop offset="50%" stop-color="#334155"/>
-          <stop offset="100%" stop-color="#475569"/>
-        </linearGradient>
-      </defs>
-      <!-- Lower waterline hull shadow -->
-      <polygon points="6,20 116,12 154,24 154,50 116,66 6,58 3,39" fill="#0f172a"/>
-      <!-- Asymmetric angled flight deck -->
-      <polygon points="8,22 68,14 114,9 152,25 152,49 114,61 106,66 10,55 6,38" fill="url(#cvDeck)" stroke="#0f172a" stroke-width="2.5" stroke-linejoin="round"/>
-      <!-- Angled landing runway + centerline + foul lines -->
-      <line x1="16" y1="45" x2="112" y2="17" stroke="#f8fafc" stroke-width="2.2" opacity="0.85"/>
-      <line x1="18" y1="50" x2="114" y2="22" stroke="#facc15" stroke-width="1.5" stroke-dasharray="6 5"/>
-      <line x1="14" y1="40" x2="108" y2="13" stroke="#ef4444" stroke-width="1.2" opacity="0.8"/>
-      <!-- Bow steam/EMALS catapult tracks -->
-      <line x1="94" y1="36" x2="147" y2="33" stroke="#94a3b8" stroke-width="1.8"/>
-      <line x1="96" y1="43" x2="147" y2="41" stroke="#94a3b8" stroke-width="1.8"/>
-      <!-- Arresting wires -->
-      <line x1="25" y1="38" x2="31" y2="52" stroke="#cbd5e1" stroke-width="1.2"/>
-      <line x1="33" y1="35" x2="39" y2="49" stroke="#cbd5e1" stroke-width="1.2"/>
-      <!-- Deck elevators & parked carrier jets -->
-      <rect x="44" y="50" width="16" height="8" fill="#475569" stroke="#1e293b" stroke-width="1"/>
-      <polygon points="48,25 40,22 42,25 40,28" fill="#cbd5e1"/>
-      <polygon points="62,22 54,19 56,22 54,25" fill="#cbd5e1"/>
-      <polygon points="28,31 20,28 22,31 20,34" fill="#94a3b8"/>
-      <!-- Starboard Island Superstructure & Phased Radar -->
-      <rect x="74" y="47" width="28" height="12" rx="2" fill="#64748b" stroke="#090f1a" stroke-width="1.8"/>
-      <rect x="82" y="49" width="12" height="5" rx="1" fill="#38bdf8"/>
-      <circle cx="79" cy="53" r="2.6" fill="#e2e8f0" stroke="#090f1a" stroke-width="1"/>
-    </svg>`
+    { speed: 52, scale: 82, radius: 34 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="cv-deck" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6b7280"/><stop offset=".5" stop-color="#9ca3af"/><stop offset="1" stop-color="#6b7280"/></linearGradient></defs><rect x="26" y="6" width="50" height="86" rx="10" fill="#000" opacity=".3" transform="translate(3 4)"/><rect x="22" y="6" width="52" height="86" rx="10" fill="url(#cv-deck)" stroke="#0a0f1a" stroke-width="2.2"/><path d="M36 10 L68 10 L68 62 L40 62 Z" fill="#4b5563" opacity=".55" stroke="#0a0f1a" stroke-width="1"/><rect x="62" y="34" width="9" height="20" rx="2" fill="#94a3b8" stroke="#0a0f1a" stroke-width="1.4"/><rect x="64" y="30" width="5" height="6" fill="#e2e8f0" stroke="#0a0f1a" stroke-width=".8"/><line x1="40" y1="16" x2="40" y2="82" stroke="#fbbf24" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/><path d="M28 28 l4 -2 l0 -2 l2 1 l0 2 l4 -1 l-4 3 l0 3 l-2 -1 l0 -2 z" fill="#cbd5e1" stroke="#0a0f1a" stroke-width=".6"/><path d="M28 50 l4 -2 l0 -2 l2 1 l0 2 l4 -1 l-4 3 l0 3 l-2 -1 l0 -2 z" fill="#cbd5e1" stroke="#0a0f1a" stroke-width=".6"/><path d="M28 72 l4 -2 l0 -2 l2 1 l0 2 l4 -1 l-4 3 l0 3 l-2 -1 l0 -2 z" fill="#cbd5e1" stroke="#0a0f1a" stroke-width=".6"/><path d="M48 86 Q48 96 42 100 M56 86 Q56 96 62 100" stroke="#e2e8f0" stroke-width="1.2" fill="none" opacity=".35"/></svg>`
+  ),
+  submarine: defineActor(
+    'submarine',
+    'غواصة',
+    '_ship',
+    { speed: 60, scale: 46, radius: 20 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="sb-hull" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1e293b"/><stop offset=".5" stop-color="#475569"/><stop offset="1" stop-color="#1e293b"/></linearGradient></defs><ellipse cx="51" cy="52" rx="16" ry="42" fill="#000" opacity=".3"/><ellipse cx="48" cy="48" rx="15" ry="42" fill="url(#sb-hull)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M40 22 Q48 14 56 22 L56 40 L40 40 Z" fill="#475569" stroke="#0a0f1a" stroke-width="1.8"/><rect x="44" y="28" width="8" height="5" rx="1" fill="#1e293b"/><path d="M48 6 L44 16 M48 6 L52 16" stroke="#0a0f1a" stroke-width="1.2"/><path d="M24 84 L72 84 M24 12 L72 12" stroke="#0a0f1a" stroke-width="1.6" opacity=".0"/><path d="M30 68 L40 62 M66 68 L56 62 M32 30 L42 36 M64 30 L54 36" stroke="#0a0f1a" stroke-width="1.6" stroke-linecap="round"/><path d="M48 44 L48 74" stroke="#cbd5e1" stroke-width="1.4" opacity=".35"/></svg>`
+  ),
+  oil_tanker: defineActor(
+    'oil_tanker',
+    'ناقلة نفط',
+    '_ship',
+    { speed: 45, scale: 60, radius: 26 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="tn-hull" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7f1d1d"/><stop offset=".5" stop-color="#b91c1c"/><stop offset="1" stop-color="#7f1d1d"/></linearGradient><linearGradient id="tn-tank" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e2e8f0"/><stop offset="1" stop-color="#94a3b8"/></linearGradient></defs><path d="M48 4 L66 18 L70 84 L58 94 L38 94 L26 84 L30 18 Z" fill="#000" opacity=".3" transform="translate(3 4)"/><path d="M48 4 L66 18 L70 84 L58 94 L38 94 L26 84 L30 18 Z" fill="url(#tn-hull)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><rect x="32" y="22" width="12" height="11" rx="2" fill="url(#tn-tank)" stroke="#0a0f1a" stroke-width="1.2"/><rect x="32" y="36" width="12" height="11" rx="2" fill="url(#tn-tank)" stroke="#0a0f1a" stroke-width="1.2"/><rect x="32" y="50" width="12" height="11" rx="2" fill="url(#tn-tank)" stroke="#0a0f1a" stroke-width="1.2"/><rect x="52" y="22" width="12" height="11" rx="2" fill="url(#tn-tank)" stroke="#0a0f1a" stroke-width="1.2"/><rect x="52" y="36" width="12" height="11" rx="2" fill="url(#tn-tank)" stroke="#0a0f1a" stroke-width="1.2"/><rect x="52" y="50" width="12" height="11" rx="2" fill="url(#tn-tank)" stroke="#0a0f1a" stroke-width="1.2"/><rect x="38" y="66" width="20" height="16" rx="2" fill="#e2e8f0" stroke="#0a0f1a" stroke-width="1.4"/><rect x="42" y="60" width="12" height="6" rx="1" fill="#1e293b"/><line x1="48" y1="20" x2="48" y2="60" stroke="#0a0f1a" stroke-width="1" opacity=".45"/></svg>`
+  ),
+  fighter_jet: defineActor(
+    'fighter_jet',
+    'مقاتلة نفاثة',
+    '_air',
+    { speed: 205, scale: 48, radius: 22 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="jt-body" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#94a3b8"/><stop offset=".5" stop-color="#e2e8f0"/><stop offset="1" stop-color="#94a3b8"/></linearGradient><linearGradient id="jt-wing" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#cbd5e1"/><stop offset="1" stop-color="#64748b"/></linearGradient></defs><g opacity=".3" transform="translate(4 6)"><path d="M48 6 L53 22 L54 60 L58 74 L48 70 L38 74 L42 60 L43 22 Z"/><path d="M43 40 L14 62 L16 68 L43 60 Z M53 40 L82 62 L80 68 L53 60 Z"/></g><path d="M43 40 L14 62 L16 68 L43 60 Z" fill="url(#jt-wing)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M53 40 L82 62 L80 68 L53 60 Z" fill="url(#jt-wing)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M44 70 L36 84 L40 86 L46 74 Z M52 70 L60 84 L56 86 L50 74 Z" fill="#475569" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M48 6 L53 22 L54 60 L58 74 L48 70 L38 74 L42 60 L43 22 Z" fill="url(#jt-body)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><ellipse cx="48" cy="30" rx="4.2" ry="8" fill="#38bdf8" stroke="#0a0f1a" stroke-width="1.2"/><path d="M44 24 L52 24" stroke="#e0f2fe" stroke-width="1" opacity=".6"/><path d="M46 72 L50 72 L49 78 L47 78 Z" fill="#f97316" opacity=".7"/><circle cx="48" cy="60" r="0" fill="none"/><rect x="45.5" y="66" width="5" height="3" fill="#0a0f1a" opacity=".6"/></svg>`
+  ),
+  stealth_bomber: defineActor(
+    'stealth_bomber',
+    'قاذفة شبحية',
+    '_air',
+    { speed: 180, scale: 56, radius: 26 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="sb-wing" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4b5563"/><stop offset="1" stop-color="#1f2937"/></linearGradient></defs><path d="M48 14 L86 66 L70 74 L60 70 L48 80 L36 70 L26 74 L10 66 Z" fill="#000" opacity=".32" transform="translate(4 5)"/><path d="M48 14 L86 66 L70 74 L60 70 L48 80 L36 70 L26 74 L10 66 Z" fill="url(#sb-wing)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M48 14 L60 58 L48 80 L36 58 Z" fill="#334155" opacity=".55"/><path d="M48 14 L48 80" stroke="#0a0f1a" stroke-width="1" opacity=".5"/><path d="M46 30 L50 30 L50 40 L46 40 Z" fill="#38bdf8" opacity=".75" stroke="#0a0f1a" stroke-width=".8"/></svg>`
+  ),
+  attack_heli: defineActor(
+    'attack_heli',
+    'مروحية هجومية',
+    '_heli',
+    { speed: 140, scale: 46, radius: 21 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="ah-body" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3b4a2e"/><stop offset=".5" stop-color="#6b7f52"/><stop offset="1" stop-color="#3b4a2e"/></linearGradient></defs><ellipse cx="51" cy="50" rx="14" ry="24" fill="#000" opacity=".3"/><rect x="18" y="40" width="60" height="6" rx="3" fill="#3b4a2e" stroke="#0a0f1a" stroke-width="1.6"/><rect x="16" y="38" width="8" height="10" rx="2" fill="#dc2626" stroke="#0a0f1a" stroke-width="1"/><rect x="72" y="38" width="8" height="10" rx="2" fill="#dc2626" stroke="#0a0f1a" stroke-width="1"/><rect x="16" y="46" width="8" height="10" rx="2" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="1"/><rect x="72" y="46" width="8" height="10" rx="2" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="1"/><ellipse cx="48" cy="46" rx="13" ry="22" fill="url(#ah-body)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M42 26 Q48 18 54 26 L54 34 L42 34 Z" fill="#38bdf8" opacity=".8" stroke="#0a0f1a" stroke-width="1.2"/><rect x="45" y="64" width="6" height="26" rx="2" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="1.4"/><ellipse cx="48" cy="90" rx="6" ry="2.4" fill="#2f3d25" stroke="#0a0f1a" stroke-width="1"/><circle cx="48" cy="44" r="4" fill="#1e293b" stroke="#0a0f1a" stroke-width="1.2"/></svg>`
+  ),
+  transport_plane: defineActor(
+    'transport_plane',
+    'طائرة نقل عسكرية',
+    '_air',
+    { speed: 170, scale: 60, radius: 28 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="tp-wing" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7d8a6a"/><stop offset="1" stop-color="#3f4b33"/></linearGradient><linearGradient id="tp-body" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#94a3b8"/><stop offset=".5" stop-color="#e2e8f0"/><stop offset="1" stop-color="#94a3b8"/></linearGradient></defs><rect x="8" y="38" width="84" height="14" rx="4" fill="#000" opacity=".3" transform="translate(4 5)"/><rect x="6" y="38" width="84" height="14" rx="4" fill="url(#tp-wing)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><rect x="38" y="6" width="20" height="84" rx="10" fill="url(#tp-body)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><rect x="30" y="74" width="36" height="8" rx="2" fill="url(#tp-wing)" stroke="#0a0f1a" stroke-width="1.6"/><ellipse cx="22" cy="46" rx="3.8" ry="7" fill="#334155" stroke="#0a0f1a" stroke-width="1.2"/><ellipse cx="32" cy="46" rx="3.8" ry="7" fill="#334155" stroke="#0a0f1a" stroke-width="1.2"/><ellipse cx="64" cy="46" rx="3.8" ry="7" fill="#334155" stroke="#0a0f1a" stroke-width="1.2"/><ellipse cx="74" cy="46" rx="3.8" ry="7" fill="#334155" stroke="#0a0f1a" stroke-width="1.2"/><path d="M42 12 Q48 6 54 12" stroke="#38bdf8" stroke-width="2.4" fill="none" opacity=".8"/><rect x="44" y="16" width="8" height="5" rx="1" fill="#38bdf8" opacity=".7"/></svg>`
+  ),
+  drone: defineActor(
+    'drone',
+    'طائرة مسيّرة',
+    '_air',
+    { speed: 120, scale: 30, radius: 14 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="dr-w" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#cbd5e1"/><stop offset="1" stop-color="#64748b"/></linearGradient><linearGradient id="dr-b" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#64748b"/><stop offset=".5" stop-color="#e2e8f0"/><stop offset="1" stop-color="#64748b"/></linearGradient></defs><path d="M48 18 L84 46 L84 52 L48 46 L12 52 L12 46 Z" fill="#000" opacity=".3" transform="translate(3 5)"/><path d="M48 18 L84 46 L84 52 L48 46 L12 52 L12 46 Z" fill="url(#dr-w)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><ellipse cx="48" cy="48" rx="7" ry="20" fill="url(#dr-b)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M32 66 L64 66 L60 72 L36 72 Z" fill="#475569" stroke="#0a0f1a" stroke-width="1.2"/><circle cx="48" cy="30" r="3" fill="#38bdf8" stroke="#0a0f1a" stroke-width=".8"/></svg>`
   ),
   military_base: defineActor(
     'military_base',
     'قاعدة عسكرية',
     '_building',
-    { scale: 64, radius: 29 },
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
-      <!-- Perimeter tarmac pad -->
-      <rect x="5" y="7" width="70" height="66" rx="5" fill="#1e293b" stroke="#090f1a" stroke-width="2.6"/>
-      <rect x="8" y="10" width="64" height="60" rx="3" fill="#283548" stroke="#475569" stroke-width="1"/>
-      <!-- Main Paved Runway with threshold piano keys -->
-      <rect x="11" y="13" width="58" height="16" rx="2" fill="#0f172a" stroke="#64748b" stroke-width="1.2"/>
-      <path d="M13 15 V27 M16 15 V27 M64 15 V27 M67 15 V27" stroke="#f8fafc" stroke-width="1.4"/>
-      <line x1="21" y1="21" x2="59" y2="21" stroke="#facc15" stroke-width="1.6" stroke-dasharray="6 4"/>
-      <!-- Hardened Aircraft Shelters (HAS) -->
-      <rect x="12" y="34" width="18" height="14" rx="4" fill="#475569" stroke="#090f1a" stroke-width="1.6"/>
-      <path d="M15 48 V39 C15 36 27 36 27 39 V48 Z" fill="#1e293b"/>
-      <rect x="12" y="52" width="18" height="14" rx="4" fill="#475569" stroke="#090f1a" stroke-width="1.6"/>
-      <path d="M15 66 V57 C15 54 27 54 27 57 V66 Z" fill="#1e293b"/>
-      <!-- Helipad & Control Tower -->
-      <circle cx="43" cy="52" r="11" fill="#0f172a" stroke="#38bdf8" stroke-width="1.8" stroke-dasharray="4 2"/>
-      <path d="M39 47 V57 M47 47 V57 M39 52 H47" stroke="#facc15" stroke-width="2" stroke-linecap="round"/>
-      <rect x="57" y="36" width="12" height="12" rx="2" fill="#64748b" stroke="#090f1a" stroke-width="1.5"/>
-      <circle cx="63" cy="42" r="3.5" fill="#38bdf8"/>
-      <circle cx="62" cy="59" r="5" fill="#94a3b8" stroke="#090f1a" stroke-width="1.5"/>
-    </svg>`
-  ),
-  oil_facility: defineActor(
-    'oil_facility',
-    'منشأة نفطية',
-    '_building',
-    { scale: 62, radius: 28 },
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
-      <rect x="6" y="8" width="68" height="64" rx="5" fill="#1e293b" stroke="#090f1a" stroke-width="2.6"/>
-      <rect x="9" y="11" width="62" height="58" rx="3" fill="#273244" stroke="#475569" stroke-width="1"/>
-      <!-- Pipeline Manifold -->
-      <path d="M14 26 H66 M14 48 H56 M26 14 V62 M46 14 V50" stroke="#94a3b8" stroke-width="2.4" fill="none"/>
-      <!-- Crude Oil Floating-Roof Storage Tanks -->
-      <circle cx="24" cy="25" r="10.5" fill="#e2e8f0" stroke="#334155" stroke-width="2"/>
-      <circle cx="24" cy="25" r="6.5" fill="#cbd5e1" stroke="#64748b" stroke-width="1"/>
-      <circle cx="24" cy="52" r="10" fill="#cbd5e1" stroke="#334155" stroke-width="2"/>
-      <circle cx="24" cy="52" r="6" fill="#94a3b8" stroke="#64748b" stroke-width="1"/>
-      <!-- Fractional Distillation Columns -->
-      <circle cx="46" cy="24" r="7.5" fill="#94a3b8" stroke="#0f172a" stroke-width="1.8"/>
-      <circle cx="46" cy="24" r="3" fill="#334155"/>
-      <rect x="39" y="38" width="16" height="14" rx="2" fill="#475569" stroke="#090f1a" stroke-width="1.6"/>
-      <line x1="42" y1="41" x2="52" y2="41" stroke="#cbd5e1" stroke-width="1.5"/>
-      <line x1="42" y1="46" x2="52" y2="46" stroke="#cbd5e1" stroke-width="1.5"/>
-      <!-- Gas Flare Stack -->
-      <circle cx="62" cy="54" r="6.5" fill="#7c2d12" stroke="#090f1a" stroke-width="1.5"/>
-      <circle cx="62" cy="54" r="4.2" fill="#f97316"/>
-      <circle cx="62" cy="54" r="2.2" fill="#fef08a"/>
-    </svg>`
+    { scale: 56, radius: 30 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect x="10" y="10" width="80" height="80" rx="6" fill="#000" opacity=".32" transform="translate(4 5)"/><rect x="8" y="8" width="80" height="80" rx="4" fill="#6b5f48" stroke="#0a0f1a" stroke-width="2.4"/><rect x="14" y="14" width="68" height="68" rx="2" fill="#8a7a5c" opacity=".55"/><rect x="16" y="18" width="30" height="18" rx="2" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="1.6"/><rect x="50" y="18" width="30" height="18" rx="2" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="1.6"/><rect x="36" y="44" width="24" height="18" rx="2" fill="#5b6675" stroke="#0a0f1a" stroke-width="1.6"/><line x1="48" y1="44" x2="48" y2="32" stroke="#0a0f1a" stroke-width="1.2"/><path d="M48 32 L56 35 L48 38 Z" fill="#dc2626" stroke="#0a0f1a" stroke-width=".8"/><circle cx="71" cy="70" r="11" fill="#3f4a33" stroke="#0a0f1a" stroke-width="1.6"/><text x="71" y="74.5" text-anchor="middle" font-size="13" font-weight="700" fill="#f8fafc" font-family="sans-serif">H</text><rect x="16" y="66" width="14" height="8" rx="1" fill="#334155" stroke="#0a0f1a" stroke-width="1"/><rect x="34" y="68" width="12" height="6" rx="1" fill="#334155" stroke="#0a0f1a" stroke-width="1"/><path d="M8 48 L4 48 M88 48 L92 48" stroke="#0a0f1a" stroke-width="2.4"/></svg>`
   ),
   radar_outpost: defineActor(
     'radar_outpost',
     'محطة رادار',
     '_building',
-    { scale: 54, radius: 24 },
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72">
-      <rect x="8" y="8" width="56" height="56" rx="6" fill="#1e293b" stroke="#090f1a" stroke-width="2.5"/>
-      <polygon points="20,14 52,14 58,20 58,52 52,58 20,58 14,52 14,20" fill="#334155" stroke="#475569" stroke-width="1.5"/>
-      <circle cx="36" cy="36" r="16" fill="#0c4a6e" stroke="#38bdf8" stroke-width="2"/>
-      <circle cx="36" cy="36" r="10" fill="none" stroke="#7dd3fc" stroke-width="1" stroke-dasharray="3 2"/>
-      <polygon points="36,36 50,24 53,29" fill="#38bdf8" opacity="0.45"/>
-      <line x1="36" y1="36" x2="49" y2="23" stroke="#fef08a" stroke-width="2.4" stroke-linecap="round"/>
-      <circle cx="36" cy="36" r="3.5" fill="#e2e8f0" stroke="#090f1a" stroke-width="1.4"/>
-    </svg>`
+    { scale: 50, radius: 26 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><radialGradient id="rd-dish" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#e2e8f0"/><stop offset="1" stop-color="#64748b"/></radialGradient></defs><rect x="10" y="10" width="80" height="80" rx="6" fill="#000" opacity=".32" transform="translate(4 5)"/><rect x="10" y="10" width="76" height="76" rx="8" fill="#334155" stroke="#0a0f1a" stroke-width="2.4"/><circle cx="48" cy="46" r="26" fill="url(#rd-dish)" stroke="#0a0f1a" stroke-width="2"/><circle cx="48" cy="46" r="17" fill="none" stroke="#e2e8f0" stroke-width=".8" opacity=".5"/><circle cx="48" cy="46" r="8" fill="none" stroke="#e2e8f0" stroke-width=".8" opacity=".5"/><path d="M48 20 L48 72 M22 46 L74 46" stroke="#0a0f1a" stroke-width="1" opacity=".5"/><circle cx="48" cy="46" r="4" fill="#dc2626" stroke="#0a0f1a" stroke-width="1"/><rect x="16" y="16" width="14" height="10" rx="1.5" fill="#475569" stroke="#0a0f1a" stroke-width="1"/><rect x="66" y="66" width="14" height="10" rx="1.5" fill="#475569" stroke="#0a0f1a" stroke-width="1"/></svg>`
+  ),
+  oil_facility: defineActor(
+    'oil_facility',
+    'منشأة نفطية',
+    '_building',
+    { scale: 52, radius: 28 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><radialGradient id="oi-tank" cx=".35" cy=".3" r=".75"><stop offset="0" stop-color="#e5e7eb"/><stop offset="1" stop-color="#6b7280"/></radialGradient></defs><rect x="10" y="10" width="80" height="80" rx="6" fill="#000" opacity=".32" transform="translate(4 5)"/><rect x="8" y="8" width="80" height="80" rx="4" fill="#4a4538" stroke="#0a0f1a" stroke-width="2.2"/><path d="M16 48 L80 48 M48 16 L48 80 M26 26 L70 70" stroke="#94a3b8" stroke-width="3" opacity=".7" stroke-linecap="round"/><circle cx="28" cy="34" r="11" fill="url(#oi-tank)" stroke="#0a0f1a" stroke-width="1.8"/><circle cx="66" cy="34" r="11" fill="url(#oi-tank)" stroke="#0a0f1a" stroke-width="1.8"/><circle cx="48" cy="68" r="12" fill="url(#oi-tank)" stroke="#0a0f1a" stroke-width="1.8"/><rect x="62" y="62" width="10" height="12" rx="2" fill="#7c2d12" stroke="#0a0f1a" stroke-width="1"/><circle cx="78" cy="78" r="4" fill="#f97316" opacity=".85"/><rect x="14" y="60" width="14" height="8" rx="2" fill="#374151" stroke="#0a0f1a" stroke-width="1"/></svg>`
   ),
   supply_depot: defineActor(
     'supply_depot',
     'مستودع إمداد',
     '_building',
-    { scale: 54, radius: 24 },
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72">
-      <rect x="7" y="9" width="58" height="54" rx="4" fill="#292524" stroke="#090f1a" stroke-width="2.5"/>
-      <!-- Corrugated Logistics Warehouses -->
-      <rect x="12" y="14" width="22" height="30" rx="2" fill="#78716c" stroke="#090f1a" stroke-width="1.6"/>
-      <path d="M12 21 H34 M12 28 H34 M12 35 H34" stroke="#57534e" stroke-width="1.3"/>
-      <rect x="38" y="14" width="22" height="30" rx="2" fill="#78716c" stroke="#090f1a" stroke-width="1.6"/>
-      <path d="M38 21 H60 M38 28 H60 M38 35 H60" stroke="#57534e" stroke-width="1.3"/>
-      <!-- Shipping Containers & Fuel Drums -->
-      <rect x="12" y="48" width="16" height="9" rx="1" fill="#b45309" stroke="#090f1a" stroke-width="1.2"/>
-      <rect x="31" y="48" width="16" height="9" rx="1" fill="#3f6212" stroke="#090f1a" stroke-width="1.2"/>
-      <circle cx="55" cy="52.5" r="4" fill="#d97706" stroke="#090f1a" stroke-width="1.2"/>
-    </svg>`
-  )
+    { scale: 48, radius: 26 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect x="10" y="10" width="80" height="80" rx="6" fill="#000" opacity=".32" transform="translate(4 5)"/><rect x="8" y="8" width="80" height="80" rx="4" fill="#5b5a4f" stroke="#0a0f1a" stroke-width="2.2"/><rect x="14" y="16" width="30" height="20" rx="2" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="1.6"/><line x1="14" y1="26" x2="44" y2="26" stroke="#0a0f1a" stroke-width="1" opacity=".5"/><rect x="52" y="16" width="30" height="20" rx="2" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="1.6"/><line x1="52" y1="26" x2="82" y2="26" stroke="#0a0f1a" stroke-width="1" opacity=".5"/><rect x="14" y="48" width="68" height="34" rx="2" fill="#6b7280" stroke="#0a0f1a" stroke-width="1.6" opacity=".7"/><rect x="18" y="54" width="10" height="10" rx="1" fill="#d97706" stroke="#0a0f1a" stroke-width="1"/><rect x="32" y="54" width="10" height="10" rx="1" fill="#d97706" stroke="#0a0f1a" stroke-width="1"/><rect x="46" y="54" width="10" height="10" rx="1" fill="#d97706" stroke="#0a0f1a" stroke-width="1"/><rect x="60" y="54" width="10" height="10" rx="1" fill="#d97706" stroke="#0a0f1a" stroke-width="1"/><rect x="74" y="54" width="10" height="10" rx="1" fill="#d97706" stroke="#0a0f1a" stroke-width="1"/><rect x="18" y="68" width="10" height="10" rx="1" fill="#d97706" stroke="#0a0f1a" stroke-width="1"/><rect x="46" y="68" width="10" height="10" rx="1" fill="#d97706" stroke="#0a0f1a" stroke-width="1"/><rect x="60" y="68" width="10" height="10" rx="1" fill="#d97706" stroke="#0a0f1a" stroke-width="1"/></svg>`
+  ),
+  government_hq: defineActor(
+    'government_hq',
+    'مقر حكومي',
+    '_building',
+    { scale: 52, radius: 28 },
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="gv-b" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#cbd5e1"/><stop offset="1" stop-color="#94a3b8"/></linearGradient><radialGradient id="gv-dome" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#e2e8f0"/><stop offset="1" stop-color="#94a3b8"/></radialGradient></defs><rect x="10" y="10" width="80" height="80" rx="6" fill="#000" opacity=".32" transform="translate(4 5)"/><rect x="8" y="8" width="80" height="80" rx="4" fill="#64748b" opacity=".35" stroke="#0a0f1a" stroke-width="2"/><rect x="18" y="22" width="60" height="50" rx="3" fill="url(#gv-b)" stroke="#0a0f1a" stroke-width="2.2"/><rect x="24" y="26" width="3" height="42" fill="#e2e8f0" opacity=".7"/><rect x="32" y="26" width="3" height="42" fill="#e2e8f0" opacity=".7"/><rect x="40" y="26" width="3" height="42" fill="#e2e8f0" opacity=".7"/><rect x="48" y="26" width="3" height="42" fill="#e2e8f0" opacity=".7"/><rect x="56" y="26" width="3" height="42" fill="#e2e8f0" opacity=".7"/><rect x="64" y="26" width="3" height="42" fill="#e2e8f0" opacity=".7"/><rect x="72" y="26" width="3" height="42" fill="#e2e8f0" opacity=".7"/><circle cx="48" cy="20" r="9" fill="url(#gv-dome)" stroke="#0a0f1a" stroke-width="1.6"/><line x1="48" y1="8" x2="48" y2="14" stroke="#0a0f1a" stroke-width="1.2"/><path d="M48 8 L58 10 L48 13 Z" fill="#16a34a" stroke="#0a0f1a" stroke-width=".8"/><rect x="42" y="60" width="12" height="12" rx="1" fill="#1e293b" stroke="#0a0f1a" stroke-width="1"/><path d="M18 80 L78 80" stroke="#94a3b8" stroke-width="2" opacity=".6"/></svg>`
+  ),
 };
 
 export const DEMO_MAPS: Record<string, MapPack> = {};
