@@ -1,4 +1,5 @@
 import { findPath, isWalkable } from './pathfinding';
+import { updateEntityMovement } from './movement';
 import {
   ActorPack,
   ArrowState,
@@ -223,7 +224,6 @@ export class StudioEngine {
     if (this.craters.length > 60) this.craters.shift();
     this.emitSound('explosion');
 
-    // تدمير الوحدات أو المنشآت المعادية/المحايدة ضمن نطاق الانفجار
     const hitIds: string[] = [];
     for (const ent of this.entities.values()) {
       if (ent.kind === 'air' && ent.altitude > 0.35) continue;
@@ -279,76 +279,51 @@ export class StudioEngine {
         continue;
       }
 
-      if (e.path.length > 0) {
-        e.isMoving = true;
-        const target = e.path[0];
-        const dx = target.x - e.x;
-        const dy = target.y - e.y;
-        const dist = Math.hypot(dx, dy);
+      // --- Professional path following (Pure Pursuit + braking + kind profiles) ---
+      const justArrived = updateEntityMovement(e, {
+        map: this.map,
+        canOccupy: (x, y, domain) => this.canOccupy(x, y, domain),
+        dt: DT
+      });
 
-        // تسارع وتباطؤ سلس نحو السرعة القصوى
-        e.currentSpeed = Math.min(e.speed, e.currentSpeed + e.speed * 2.6 * DT);
+      if (justArrived) {
+        e.arrivedTick = this.tick;
 
-        // التوجيه: الهيكل يدور نحو الهدف بحد أقصى لمعدل الدوران فقط
-        let diff = 0;
-        if (dist > 0.0001) {
-          diff = normalizeAngleDiff(Math.atan2(dy, dx), e.angle);
-          const maxTurn = e.turnRate * DT;
-          e.angle += Math.max(-maxTurn, Math.min(maxTurn, diff));
+        // Air strike payload: drop bomb then return home
+        if (e.pendingStrike && e.kind === 'air') {
+          const ps = e.pendingStrike;
+          this.projectiles.push({
+            id: `prj_${this.tick}_${e.id}`,
+            mode: 'bomb',
+            x: e.x,
+            y: e.y,
+            prevX: e.x,
+            prevY: e.y,
+            startX: e.x,
+            startY: e.y,
+            targetX: ps.to.x,
+            targetY: ps.to.y,
+            altitude: 0.9,
+            progress: 0,
+            durationSec: 0.85,
+            radius: ps.radius,
+            color: ps.color,
+            faction: e.faction
+          });
+          e.pendingStrike = null;
+          // Send jet home
+          const homePath = findPath(this.map, { x: e.x, y: e.y }, ps.returnTo, e.domain);
+          e.path = homePath.length > 0 ? homePath : [{ ...ps.returnTo }];
+          e.arrivedTick = null;
         }
-        // تخفيف السرعة في المنعطفات الحادة ليكون المسار منحنياً وواقعياً
-        const absDiff = Math.abs(diff);
-        const turnFactor =
-          e.kind === 'air'
-            ? Math.max(0.6, Math.cos(Math.min(absDiff, 1.2)))
-            : Math.max(0.3, Math.cos(Math.min(absDiff, 1.4)));
-        const step = e.currentSpeed * turnFactor * DT;
+      }
 
-        // نقطة الوصول: صغيرة للنقاط الوسطى حتى يتبع المسار المحدد بدقة
-        const isLast = e.path.length === 1;
-        const capture = isLast ? Math.max(step, 1.5) : Math.max(step, 8);
-        if (dist <= capture) {
-          e.x = target.x;
-          e.y = target.y;
-          e.path.shift();
-          if (e.path.length === 0) {
-            e.isMoving = false;
-            e.currentSpeed = 0;
-            e.arrivedTick = this.tick;
-          }
-        } else {
-          // التقدم للأمام باتجاه الهيكل فقط، بدون انزلاق جانبي
-          const fx = e.x + Math.cos(e.angle) * step;
-          const fy = e.y + Math.sin(e.angle) * step;
-          if (this.canOccupy(fx, fy, e.domain)) {
-            e.x = fx;
-            e.y = fy;
-          } else {
-            // عائق أمامه: ينعطف إلى أقرب اتجاه مفتوح ويكمل بسلاسة
-            let moved = false;
-            for (const off of [0.35, -0.35, 0.8, -0.8, 1.3, -1.3]) {
-              const a = e.angle + off;
-              const nx = e.x + Math.cos(a) * step;
-              const ny = e.y + Math.sin(a) * step;
-              if (this.canOccupy(nx, ny, e.domain)) {
-                e.angle = a;
-                e.x = nx;
-                e.y = ny;
-                moved = true;
-                break;
-              }
-            }
-            if (!moved) e.currentSpeed = 0;
-          }
-        }
-
-        // ميل بصري خفيف للطائرات أثناء الانعطاف
-        const desiredBank = e.kind === 'air' ? Math.max(-0.3, Math.min(0.3, diff * 0.5)) : 0;
-        e.bankAngle += (desiredBank - e.bankAngle) * Math.min(1, DT * 4);
-      } else {
-        e.isMoving = false;
-        e.currentSpeed = 0;
-        e.bankAngle *= 0.85;
+      // Air altitude: climb while moving / on sortie, descend when idle near home
+      if (e.kind === 'air') {
+        const nearHome = Math.hypot(e.x - e.homeX, e.y - e.homeY) < 28 && e.path.length === 0;
+        const targetAlt = nearHome ? 0 : e.isMoving || e.pendingStrike ? 1 : 0.15;
+        e.altitude += (targetAlt - e.altitude) * Math.min(1, DT * 2.4);
+        if (Math.abs(e.altitude - targetAlt) < 0.02) e.altitude = targetAlt;
       }
     }
 
@@ -716,23 +691,20 @@ export class StudioEngine {
             attacker.angle = Math.atan2(ord.to.y - attacker.y, ord.to.x - attacker.x);
           }
           const dist = Math.hypot(ord.to.x - launchPt.x, ord.to.y - launchPt.y);
-          // الرصاص: عدة طلقات متقاربة حول الهدف بإزاحات ثابتة (حتمية لإعادة التشغيل)
           const shots: Array<[number, number]> =
-            ord.mode === 'gunfire' ? [[0, 0], [-9, 5], [7, -6], [-4, -9], [10, 7]] : [[0, 0]];
-          const pType: ProjectileState['mode'] =
-            ord.mode === 'missile' ? 'missile' : ord.mode === 'direct' ? 'direct' : ord.mode === 'gunfire' ? 'gunfire' : 'bomb';
-          const dur =
-            ord.mode === 'missile'
-              ? Math.max(0.85, Math.min(2.6, dist / 240))
-              : ord.mode === 'direct'
-                ? Math.max(0.16, Math.min(0.5, dist / 900))
-                : ord.mode === 'gunfire'
-                  ? Math.max(0.1, Math.min(0.3, dist / 1400))
-                  : Math.max(0.45, Math.min(1.2, dist / 320));
+            ord.mode === 'gunfire'
+              ? [
+                  [0, 0],
+                  [6, -4],
+                  [-5, 7],
+                  [3, 5]
+                ]
+              : [[0, 0]];
           for (const [ox, oy] of shots) {
+            const pType = ord.mode === 'missile' ? 'missile' : ord.mode === 'direct' ? 'direct' : ord.mode === 'gunfire' ? 'gunfire' : 'bomb';
             this.projectiles.push({
-              id: `proj_${++this.autoCounter}`,
-              mode: pType,
+              id: `prj_${++this.autoCounter}`,
+              mode: pType as 'bomb' | 'missile' | 'direct' | 'gunfire',
               x: launchPt.x,
               y: launchPt.y,
               prevX: launchPt.x,
@@ -743,21 +715,16 @@ export class StudioEngine {
               targetY: ord.to.y + oy,
               altitude: pType === 'direct' || pType === 'gunfire' ? 0 : 0.1,
               progress: 0,
-              durationSec: dur,
+              durationSec: Math.max(0.25, Math.min(2.2, dist / 420)),
               radius,
               color,
               faction
             });
           }
-          this.emitSound(
-            ord.mode === 'missile'
-              ? 'missile_launch'
-              : ord.mode === 'direct'
-                ? 'cannon_fire'
-                : ord.mode === 'gunfire'
-                  ? 'rifle_fire'
-                  : 'jet_takeoff'
-          );
+          if (ord.mode === 'missile') this.emitSound('missile_launch');
+          else if (ord.mode === 'gunfire') this.emitSound('rifle_fire');
+          else if (ord.mode === 'direct') this.emitSound('cannon_fire');
+          else this.emitSound('jet_takeoff');
         }
       } else if (ord.type === 'remove') {
         this.removeEntityWithCallouts(ord.entityId);
