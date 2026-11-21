@@ -748,33 +748,33 @@ export class StudioRenderer {
 
       const entScale = this.lastUnitFactor * (ent.scaleMul ?? 1);
       view.container.position.set(x, y);
-      view.container.scale.set(entScale * (1 + alt * 0.28));
+      view.container.scale.set(entScale);
 
       // تحديث الظل الأرضي المتصل بالارتفاع والاتجاه + تدوير الأقواس التكتيكية
+      // الرسوم مرسومة وأنفها للأعلى، لذلك يُضاف 90 درجة إلى زاوية الاتجاه
+      const facing = smoothAng + Math.PI / 2;
       if (ent.kind === 'air') {
-        view.shadow.position.set(alt * 28, 8 + alt * 34);
-        view.shadow.rotation = smoothAng;
-        view.shadow.alpha = Math.max(0.22, 0.45 - alt * 0.16);
-        view.shadow.scale.set(1 + alt * 0.14);
-        view.factionHalo.rotation = smoothAng;
-        view.ring.rotation = smoothAng;
-      } else if (ent.kind === 'ship' || ent.kind === 'vehicle') {
+        view.shadow.position.set(12, 26);
+        view.shadow.rotation = facing;
+        view.shadow.alpha = 0.32;
+        view.factionHalo.rotation = facing;
+        view.ring.rotation = facing;
+      } else if (ent.kind === 'ship' || ent.kind === 'vehicle' || ent.kind === 'person') {
         view.shadow.position.set(2, ent.scale * 0.16);
-        view.shadow.rotation = smoothAng;
-        view.factionHalo.rotation = smoothAng;
-        view.ring.rotation = smoothAng;
+        view.shadow.rotation = facing;
+        view.factionHalo.rotation = facing;
+        view.ring.rotation = facing;
       }
 
       if (ent.kind === 'person') {
-        const bob = ent.isMoving ? Math.abs(Math.sin(timeSec * 12)) * 3 : 0;
+        const bob = ent.isMoving ? Math.abs(Math.sin(timeSec * 12)) * 2 : 0;
         view.sprite.y = -bob;
-        view.sprite.rotation = ent.isMoving ? Math.sin(timeSec * 12) * 0.08 : 0;
+        view.sprite.rotation = facing;
       } else if (ent.kind === 'vehicle' || ent.kind === 'ship') {
-        view.sprite.rotation = smoothAng;
+        view.sprite.rotation = facing;
       } else if (ent.kind === 'air') {
-        view.sprite.rotation = smoothAng;
-        const bankSquash = Math.max(0.76, 1 - Math.abs(ent.bankAngle) * 0.28);
-        view.sprite.scale.set(view.baseSpriteScale, view.baseSpriteScale * bankSquash);
+        view.sprite.rotation = facing;
+        view.sprite.scale.set(view.baseSpriteScale);
         if (view.rotor) {
           view.rotor.rotation = timeSec * (ent.isMoving || alt > 0.05 ? 24 : 7);
         }
