@@ -246,6 +246,10 @@ export class StudioEngine {
     }
   }
 
+  private canOccupy(x: number, y: number, domain: Domain): boolean {
+    return domain === 'air' || this.isWorldPointWalkable(x, y, domain);
+  }
+
   private isWorldPointWalkable(x: number, y: number, domain: Domain): boolean {
     if (domain === 'air') return true;
     const gx = Math.floor(x / this.map.cellSize);
@@ -282,50 +286,28 @@ export class StudioEngine {
         const dy = target.y - e.y;
         const dist = Math.hypot(dx, dy);
 
-        // تسارع وانسيابية في السرعة
-        const targetSpeed = e.speed;
-        const accel = e.kind === 'air' ? e.speed * 2.4 : e.speed * 3.5;
-        e.currentSpeed = Math.min(targetSpeed, e.currentSpeed + accel * DT);
+        // تسارع وتباطؤ سلس نحو السرعة القصوى
+        e.currentSpeed = Math.min(e.speed, e.currentSpeed + e.speed * 2.6 * DT);
 
-        // إقلاع الطائرات تدريجيًا عند التحليق
-        if (e.kind === 'air') {
-          const remainDist = Math.hypot(
-            e.path[e.path.length - 1].x - e.x,
-            e.path[e.path.length - 1].y - e.y
-          );
-          const wantAlt = e.pendingStrike ? 1 : remainDist < 48 ? Math.max(0.15, remainDist / 48) : 1;
-          e.altitude += (wantAlt - e.altitude) * Math.min(1, DT * 3.2);
-        }
-
-        let turnThrottle = 1;
+        // التوجيه: الهيكل يدور نحو الهدف بحد أقصى لمعدل الدوران فقط
+        let diff = 0;
         if (dist > 0.0001) {
-          const desiredAngle = Math.atan2(dy, dx);
-          if (e.kind === 'person') {
-            // المشاة والمبعوث يبقون بوضعية عمودية سليمة دون انقلاب
-            e.angle = 0;
-            e.bankAngle = 0;
-          } else {
-            const diff = normalizeAngleDiff(desiredAngle, e.angle);
-            const maxTurn = e.turnRate * DT;
-            const stepAngle = Math.abs(diff) <= maxTurn ? diff : Math.sign(diff) * maxTurn;
-            e.angle += stepAngle;
-
-            if (e.kind === 'air') {
-              const desiredBank = Math.max(-0.42, Math.min(0.42, diff * 0.65));
-              e.bankAngle += (desiredBank - e.bankAngle) * Math.min(1, DT * 5);
-              if (Math.abs(diff) > 0.65 && dist < 130) {
-                turnThrottle = Math.max(0.55, Math.cos(Math.min(Math.PI * 0.42, Math.abs(diff) * 0.7)));
-              }
-            } else {
-              // السفن والمدرعات تخفف سرعتها داخل المنعطفات الحادة لتنعطف بقوس حقيقي بدون شقلبة
-              turnThrottle = Math.max(0.28, Math.cos(Math.min(Math.PI * 0.45, Math.abs(diff))));
-            }
-          }
+          diff = normalizeAngleDiff(Math.atan2(dy, dx), e.angle);
+          const maxTurn = e.turnRate * DT;
+          e.angle += Math.max(-maxTurn, Math.min(maxTurn, diff));
         }
+        // تخفيف السرعة في المنعطفات الحادة ليكون المسار منحنياً وواقعياً
+        const absDiff = Math.abs(diff);
+        const turnFactor =
+          e.kind === 'air'
+            ? Math.max(0.6, Math.cos(Math.min(absDiff, 1.2)))
+            : Math.max(0.3, Math.cos(Math.min(absDiff, 1.4)));
+        const step = e.currentSpeed * turnFactor * DT;
 
-        const moveDist = e.currentSpeed * turnThrottle * DT;
-        const wpCaptureRadius = e.path.length > 1 ? Math.max(moveDist, e.kind === 'air' ? 24 : 12) : moveDist;
-        if (dist <= wpCaptureRadius) {
+        // نقطة الوصول: صغيرة للنقاط الوسطى حتى يتبع المسار المحدد بدقة
+        const isLast = e.path.length === 1;
+        const capture = isLast ? Math.max(step, 1.5) : Math.max(step, 8);
+        if (dist <= capture) {
           e.x = target.x;
           e.y = target.y;
           e.path.shift();
@@ -335,103 +317,38 @@ export class StudioEngine {
             e.arrivedTick = this.tick;
           }
         } else {
-          // للكيانات المتحركة بالاتجاه الأمامي (طائرات/سفن/مركبات)، نمزج الحركة مع متجه الهدف بدقة لمنع الدوران اللانهائي
-          const ux = dx / dist;
-          const uy = dy / dist;
-          if (e.kind === 'person' || dist < 18) {
-            const nx = e.x + ux * moveDist;
-            const ny = e.y + uy * moveDist;
-            if (
-              e.domain === 'air' ||
-              this.isWorldPointWalkable(nx, ny, e.domain) ||
-              !this.isWorldPointWalkable(e.x, e.y, e.domain)
-            ) {
-              e.x = nx;
-              e.y = ny;
-            }
+          // التقدم للأمام باتجاه الهيكل فقط، بدون انزلاق جانبي
+          const fx = e.x + Math.cos(e.angle) * step;
+          const fy = e.y + Math.sin(e.angle) * step;
+          if (this.canOccupy(fx, fy, e.domain)) {
+            e.x = fx;
+            e.y = fy;
           } else {
-            const hx = Math.cos(e.angle);
-            const hy = Math.sin(e.angle);
-            const blend = dist < 55 ? 0.68 : 0.34;
-            const mx = hx * (1 - blend) + ux * blend;
-            const my = hy * (1 - blend) + uy * blend;
-            const mLen = Math.hypot(mx, my) || 1;
-            const candX = e.x + (mx / mLen) * moveDist;
-            const candY = e.y + (my / mLen) * moveDist;
-            if (
-              e.domain === 'air' ||
-              this.isWorldPointWalkable(candX, candY, e.domain) ||
-              !this.isWorldPointWalkable(e.x, e.y, e.domain)
-            ) {
-              e.x = candX;
-              e.y = candY;
-            } else {
-              // منع السفينة أو المركبة من الخروج أثناء الانعطاف فوق اليابسة أو العوائق
-              const directX = e.x + ux * moveDist;
-              const directY = e.y + uy * moveDist;
-              const desired = Math.atan2(dy, dx);
-              e.angle += normalizeAngleDiff(desired, e.angle) * Math.min(1, DT * 7);
-              if (this.isWorldPointWalkable(directX, directY, e.domain)) {
-                e.x = directX;
-                e.y = directY;
+            // عائق أمامه: ينعطف إلى أقرب اتجاه مفتوح ويكمل بسلاسة
+            let moved = false;
+            for (const off of [0.35, -0.35, 0.8, -0.8, 1.3, -1.3]) {
+              const a = e.angle + off;
+              const nx = e.x + Math.cos(a) * step;
+              const ny = e.y + Math.sin(a) * step;
+              if (this.canOccupy(nx, ny, e.domain)) {
+                e.angle = a;
+                e.x = nx;
+                e.y = ny;
+                moved = true;
+                break;
               }
             }
+            if (!moved) e.currentSpeed = 0;
           }
         }
 
-        // إطلاق القذيفة عند وصول الطائرة فوق هدف القصف ثم الالتفاف بقوس واسع والعودة للقاعدة للهبوط
-        if (e.pendingStrike) {
-          const dStrike = Math.hypot(e.pendingStrike.to.x - e.x, e.pendingStrike.to.y - e.y);
-          if (dStrike <= Math.max(28, Math.min(44, e.pendingStrike.radius * 0.5)) || e.path.length === 0) {
-            const st = e.pendingStrike;
-            e.pendingStrike = null;
-            this.projectiles.push({
-              id: `proj_${++this.autoCounter}`,
-              mode: 'bomb',
-              x: e.x,
-              y: e.y,
-              prevX: e.x,
-              prevY: e.y,
-              startX: e.x,
-              startY: e.y,
-              targetX: st.to.x,
-              targetY: st.to.y,
-              altitude: e.altitude,
-              progress: 0,
-              durationSec: 0.42,
-              radius: st.radius,
-              color: st.color,
-              faction: e.faction
-            });
-
-            // نقطة عبور بعد الهدف + قوس التفاف واسع باتجاه القاعدة ثم العودة إلى نقطة الانطلاق
-            const clampX = (vx: number) => Math.max(28, Math.min(this.map.width - 28, vx));
-            const clampY = (vy: number) => Math.max(28, Math.min(this.map.height - 28, vy));
-            const flyPast = {
-              x: clampX(st.to.x + Math.cos(e.angle) * 72),
-              y: clampY(st.to.y + Math.sin(e.angle) * 72)
-            };
-            const perpLx = -Math.sin(e.angle);
-            const perpLy = Math.cos(e.angle);
-            const toHomeX = st.returnTo.x - flyPast.x;
-            const toHomeY = st.returnTo.y - flyPast.y;
-            const side = toHomeX * perpLx + toHomeY * perpLy >= 0 ? 1 : -1;
-            const turnWing = {
-              x: clampX(flyPast.x + perpLx * side * 96 - Math.cos(e.angle) * 28),
-              y: clampY(flyPast.y + perpLy * side * 96 - Math.sin(e.angle) * 28)
-            };
-            e.path = [flyPast, turnWing, { ...st.returnTo }];
-            e.isMoving = true;
-          }
-        }
+        // ميل بصري خفيف للطائرات أثناء الانعطاف
+        const desiredBank = e.kind === 'air' ? Math.max(-0.3, Math.min(0.3, diff * 0.5)) : 0;
+        e.bankAngle += (desiredBank - e.bankAngle) * Math.min(1, DT * 4);
       } else {
         e.isMoving = false;
         e.currentSpeed = 0;
         e.bankAngle *= 0.85;
-        // هبوط الطائرة بسلاسة عند القاعدة بعد العودة
-        if (e.kind === 'air' && e.altitude > 0) {
-          e.altitude = Math.max(0, e.altitude - DT * 2.2);
-        }
       }
     }
 
@@ -689,8 +606,8 @@ export class StudioEngine {
           angle: 0,
           prevAngle: 0,
           currentSpeed: 0,
-          altitude: 0,
-          prevAltitude: 0,
+          altitude: act.kind === 'air' ? 1 : 0,
+          prevAltitude: act.kind === 'air' ? 1 : 0,
           bankAngle: 0,
           path: [],
           speed: act.speed,
@@ -762,7 +679,7 @@ export class StudioEngine {
         if (ent.kind === 'air') {
           ent.homeX = ord.to.x;
           ent.homeY = ord.to.y;
-          this.emitSound('jet_takeoff');
+          this.emitSound('move_order');
         } else if (ent.kind === 'ship') this.emitSound('ship_horn');
         else this.emitSound('move_order');
       } else if (ord.type === 'strike') {
