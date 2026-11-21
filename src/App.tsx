@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as yaml from 'js-yaml';
-import { Eye, EyeOff, Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
+import { Eye, EyeOff, Layers, Maximize2, Pause, Play, Wrench, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { ActionRecorder } from './core/actionRecorder';
 import { buildAiScenarioPrompt, generateCatalogMarkdown } from './core/catalog';
 import { DT, StudioEngine, TICK_RATE } from './core/engine';
@@ -130,6 +130,8 @@ export default function App() {
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
   const [geoLoadingMsg, setGeoLoadingMsg] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [mapToolsOpen, setMapToolsOpen] = useState(false);
 
   // Live ActionRecorder UI state
   const [actionRecording, setActionRecording] = useState(false);
@@ -1214,8 +1216,29 @@ export default function App() {
       data-entities={hudState.entityCount}
       data-map={activeMap.id}
       data-recording={String(actionRecording)}
-      className="flex flex-col lg:grid lg:grid-cols-[400px_1fr] h-screen w-screen overflow-hidden bg-[#090f1a] text-slate-100"
+      className="relative flex flex-col h-[100dvh] w-full overflow-hidden bg-[#090f1a] text-slate-100 md:mx-auto md:my-4 md:w-[390px] md:h-[844px] md:max-h-[calc(100dvh-2rem)] md:rounded-[2.25rem] md:border-4 md:border-slate-800 md:shadow-2xl"
     >
+      {toolsOpen && (
+        <div className="absolute inset-0 z-30 bg-black/50" onClick={() => setToolsOpen(false)} aria-hidden="true" />
+      )}
+      <div
+        className={`absolute inset-x-0 bottom-0 z-40 h-[85%] flex flex-col rounded-t-2xl border-t border-slate-700 bg-slate-900 shadow-2xl transition-transform duration-300 ${
+          toolsOpen ? 'translate-y-0' : 'translate-y-full pointer-events-none'
+        }`}
+        aria-hidden={!toolsOpen}
+      >
+        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800 shrink-0">
+          <span className="text-sm font-semibold text-sky-300">لوحة الأدوات</span>
+          <button
+            type="button"
+            onClick={() => setToolsOpen(false)}
+            aria-label="إغلاق لوحة الأدوات"
+            className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-hidden">
       <StudioSidebar
         activeTab={activeTab}
         onChangeTab={setActiveTab}
@@ -1333,6 +1356,8 @@ export default function App() {
         onImportPackFile={handleImportPackFile}
         packNotice={packNotice}
       />
+        </div>
+      </div>
 
       <main
         className="relative flex-1 min-h-0 h-full flex flex-col overflow-hidden bg-[#090f1a]"
@@ -1367,43 +1392,57 @@ export default function App() {
                 </span>
               </div>
 
-              <div className="pointer-events-auto flex items-center gap-0.5 sm:gap-1 bg-slate-950/92 border border-slate-800 rounded-lg p-1 shadow-lg shrink-0">
+              <div className="pointer-events-auto flex items-center gap-1 shrink-0">
                 <button
                   type="button"
-                  onClick={handleToggleAnchors}
-                  aria-label={showAnchors ? 'إخفاء المراسي' : 'إظهار المراسي'}
-                  title={showAnchors ? 'إخفاء المراسي' : 'إظهار المراسي'}
-                  className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                  onClick={() => setMapToolsOpen((o) => !o)}
+                  aria-expanded={mapToolsOpen}
+                  aria-label={mapToolsOpen ? 'طيّ أدوات الخريطة' : 'فتح أدوات الخريطة'}
+                  title={mapToolsOpen ? 'طيّ أدوات الخريطة' : 'فتح أدوات الخريطة'}
+                  className="p-1.5 rounded-lg bg-slate-950/92 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 shadow-lg transition-colors"
                 >
-                  {showAnchors ? <Eye className="w-4 h-4 text-amber-300" /> : <EyeOff className="w-4 h-4 text-slate-500" />}
+                  {mapToolsOpen ? <X className="w-4 h-4" /> : <Layers className="w-4 h-4" />}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => rendererRef.current?.zoomBy(1.18)}
-                  aria-label="تكبير الخريطة"
-                  title="تكبير الخريطة"
-                  className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-                >
-                  <ZoomIn className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => rendererRef.current?.zoomBy(0.85)}
-                  aria-label="تصغير الخريطة"
-                  title="تصغير الخريطة"
-                  className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-                >
-                  <ZoomOut className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => rendererRef.current?.resetCamera()}
-                  aria-label="ملاءمة الخريطة"
-                  title="ملاءمة الخريطة"
-                  className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-                >
-                  <Maximize2 className="w-4 h-4" />
-                </button>
+                {mapToolsOpen && (
+                  <div className="flex items-center gap-0.5 sm:gap-1 bg-slate-950/92 border border-slate-800 rounded-lg p-1 shadow-lg">
+                  <button
+                    type="button"
+                    onClick={handleToggleAnchors}
+                    aria-label={showAnchors ? 'إخفاء المراسي' : 'إظهار المراسي'}
+                    title={showAnchors ? 'إخفاء المراسي' : 'إظهار المراسي'}
+                    className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                  >
+                    {showAnchors ? <Eye className="w-4 h-4 text-amber-300" /> : <EyeOff className="w-4 h-4 text-slate-500" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => rendererRef.current?.zoomBy(1.18)}
+                    aria-label="تكبير الخريطة"
+                    title="تكبير الخريطة"
+                    className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                  >
+                    <ZoomIn className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => rendererRef.current?.zoomBy(0.85)}
+                    aria-label="تصغير الخريطة"
+                    title="تصغير الخريطة"
+                    className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                  >
+                    <ZoomOut className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => rendererRef.current?.resetCamera()}
+                    aria-label="ملاءمة الخريطة"
+                    title="ملاءمة الخريطة"
+                    className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                  >
+                    <Maximize2 className="w-4 h-4" />
+                  </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1482,8 +1521,26 @@ export default function App() {
         {/* Deterministic Timeline Scrubber */}
         <div
           aria-label="شريط الزمن التفاعلي"
-          className="bg-slate-900 border-t border-slate-800 px-4 py-2 flex items-center gap-3 text-xs shrink-0"
+          className="bg-slate-900 border-t border-slate-800 px-3 py-2 flex items-center gap-2 text-xs shrink-0"
         >
+          <button
+            type="button"
+            onClick={() => setToolsOpen(true)}
+            aria-label="فتح لوحة الأدوات"
+            title="فتح لوحة الأدوات"
+            className="p-2 rounded-lg bg-slate-800 text-sky-300 hover:bg-slate-700 shrink-0"
+          >
+            <Wrench className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setPlaying((p) => !p)}
+            aria-label={playing ? 'إيقاف مؤقت' : 'تشغيل'}
+            title={playing ? 'إيقاف مؤقت' : 'تشغيل'}
+            className="p-2 rounded-lg bg-sky-600 text-white hover:bg-sky-500 shrink-0"
+          >
+            {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+          </button>
           <span id="timeLabel" className="font-mono tabular-nums text-sky-300 w-12 shrink-0 text-center">
             {hudState.simTimeSec.toFixed(1)}s
           </span>

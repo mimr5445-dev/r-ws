@@ -218,7 +218,7 @@ export function StudioSidebar(props: StudioSidebarProps) {
   return (
     <aside
       aria-label="لوحة التحكم وصانع الحزم"
-      className="bg-slate-900 border-b lg:border-b-0 lg:border-l border-slate-800 p-3.5 flex flex-col gap-2.5 overflow-y-auto max-h-[48vh] lg:max-h-screen lg:h-screen"
+      className="bg-slate-900 p-3.5 flex flex-col gap-2.5 overflow-y-auto h-full w-full min-h-0"
     >
       {/* Header */}
       <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-800">
