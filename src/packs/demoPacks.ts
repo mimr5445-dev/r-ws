@@ -1,4 +1,4 @@
-import { ActorPack, ActorTemplate, MapPack, NavCell } from '../core/types';
+import { ActorPack, ActorTemplate, FireAbility, MapPack, NavCell } from '../core/types';
 
 // قوالب الميراث (مثل _templates في Rusted Warfare)
 export const TEMPLATES: Record<string, ActorTemplate> = {
@@ -15,7 +15,7 @@ function defineActor(
   id: string,
   label: string,
   templateName: keyof typeof TEMPLATES,
-  overrides: Partial<ActorTemplate>,
+  overrides: Partial<ActorTemplate> & { fire?: FireAbility },
   svg: string
 ): ActorPack {
   return { id, label, extends: templateName, ...TEMPLATES[templateName], ...overrides, svg };
@@ -26,14 +26,14 @@ export const DEMO_ACTORS: Record<string, ActorPack> = {
     'heavy_tank',
     'دبابة قتال رئيسية',
     '_vehicle',
-    { speed: 70, scale: 40, radius: 20 },
+    { speed: 70, scale: 40, radius: 20, fire: { mode: 'direct', label: 'إطلاق قذيفة', radius: 22, color: '#facc15' } },
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="tk-hull" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2f3d25"/><stop offset=".5" stop-color="#5d7046"/><stop offset="1" stop-color="#2f3d25"/></linearGradient><linearGradient id="tk-trk" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1a1d1f"/><stop offset="1" stop-color="#3a3f44"/></linearGradient><radialGradient id="tk-tur" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#8ea173"/><stop offset="1" stop-color="#4b5d3a"/></radialGradient></defs><ellipse cx="52" cy="53" rx="32" ry="38" fill="#000" opacity=".32"/><rect x="20" y="12" width="13" height="72" rx="4" fill="url(#tk-trk)" stroke="#0a0f1a" stroke-width="2.2"/><rect x="63" y="12" width="13" height="72" rx="4" fill="url(#tk-trk)" stroke="#0a0f1a" stroke-width="2.2"/><path d="M22 20H31M22 30H31M22 40H31M22 50H31M22 60H31M22 70H31M65 20H74M65 30H74M65 40H74M65 50H74M65 60H74M65 70H74" stroke="#0a0f1a" stroke-width="1.1" opacity=".6"/><path d="M30 14 L66 14 L70 24 L70 78 L26 78 L26 24 Z" fill="url(#tk-hull)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M32 16 L64 16 L66 24 L30 24 Z" fill="#c7d2a3" opacity=".45"/><rect x="36" y="74" width="24" height="5" rx="1" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1"/><path d="M30 60 q6 -6 12 -2 q4 4 0 10 q-8 4 -12 -2 Z" fill="#8a7447" opacity=".7"/><path d="M56 30 q7 -2 9 6 q-2 6 -9 4 Z" fill="#3e4a30" opacity=".7"/><circle cx="48" cy="48" r="13" fill="url(#tk-tur)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><rect x="45.5" y="8" width="5" height="36" rx="1.5" fill="#2b3024" stroke="#0a0f1a" stroke-width="1.6"/><rect x="43.5" y="6" width="9" height="5" rx="1" fill="#1a1d1f"/><circle cx="45" cy="44" r="3.2" fill="#3f4a33" stroke="#0a0f1a" stroke-width="1"/></svg>`
   ),
   infantry_squad: defineActor(
     'infantry_squad',
     'فصيل مشاة',
     '_person',
-    { speed: 60, scale: 38, radius: 15 },
+    { speed: 60, scale: 38, radius: 15, fire: { mode: 'gunfire', label: 'إطلاق رصاص', radius: 9, color: '#fde047' } },
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><radialGradient id="inf-h" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#8ea173"/><stop offset="1" stop-color="#3f4f2d"/></radialGradient></defs><g transform="translate(48 48) scale(1.5) translate(-48 -48)"><ellipse cx="26" cy="33" rx="9" ry="6.5" fill="#000" opacity=".3"/><line x1="26" y1="28" x2="33" y2="16" stroke="#1f2937" stroke-width="2.4" stroke-linecap="round"/><ellipse cx="24" cy="30" rx="8" ry="6" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><circle cx="24" cy="29" r="4.6" fill="url(#inf-h)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M20 31 L28 31" stroke="#2f3d25" stroke-width="1.4"/><ellipse cx="52" cy="25" rx="9" ry="6.5" fill="#000" opacity=".3"/><line x1="52" y1="20" x2="59" y2="8" stroke="#1f2937" stroke-width="2.4" stroke-linecap="round"/><ellipse cx="50" cy="22" rx="8" ry="6" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><circle cx="50" cy="21" r="4.6" fill="url(#inf-h)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M46 23 L54 23" stroke="#2f3d25" stroke-width="1.4"/><ellipse cx="72" cy="41" rx="9" ry="6.5" fill="#000" opacity=".3"/><line x1="72" y1="36" x2="79" y2="24" stroke="#1f2937" stroke-width="2.4" stroke-linecap="round"/><ellipse cx="70" cy="38" rx="8" ry="6" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><circle cx="70" cy="37" r="4.6" fill="url(#inf-h)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M66 39 L74 39" stroke="#2f3d25" stroke-width="1.4"/><ellipse cx="36" cy="63" rx="9" ry="6.5" fill="#000" opacity=".3"/><line x1="36" y1="58" x2="43" y2="46" stroke="#1f2937" stroke-width="2.4" stroke-linecap="round"/><ellipse cx="34" cy="60" rx="8" ry="6" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><circle cx="34" cy="59" r="4.6" fill="url(#inf-h)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M30 61 L38 61" stroke="#2f3d25" stroke-width="1.4"/><ellipse cx="64" cy="69" rx="9" ry="6.5" fill="#000" opacity=".3"/><line x1="64" y1="64" x2="71" y2="52" stroke="#1f2937" stroke-width="2.4" stroke-linecap="round"/><ellipse cx="62" cy="66" rx="8" ry="6" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><circle cx="62" cy="65" r="4.6" fill="url(#inf-h)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M58 67 L66 67" stroke="#2f3d25" stroke-width="1.4"/></g></svg>`
   ),
   apc_armored: defineActor(
@@ -54,21 +54,21 @@ export const DEMO_ACTORS: Record<string, ActorPack> = {
     'ballistic_launcher',
     'منصة صواريخ باليستية',
     '_vehicle',
-    { speed: 55, scale: 46, radius: 22 },
+    { speed: 55, scale: 46, radius: 22, fire: { mode: 'missile', label: 'إطلاق صاروخ باليستي', radius: 70, color: '#f97316' } },
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="bl-body" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2f3d25"/><stop offset=".5" stop-color="#5d7046"/><stop offset="1" stop-color="#2f3d25"/></linearGradient><linearGradient id="bl-msl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#cbd5e1"/><stop offset=".5" stop-color="#f1f5f9"/><stop offset="1" stop-color="#94a3b8"/></linearGradient></defs><ellipse cx="52" cy="53" rx="32" ry="38" fill="#000" opacity=".32"/><rect x="20" y="16" width="10" height="15" rx="3" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1.2"/><circle cx="25" cy="23.5" r="2.6" fill="#7b8798" stroke="#0a0f1a" stroke-width=".8"/><rect x="20" y="30" width="10" height="15" rx="3" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1.2"/><circle cx="25" cy="37.5" r="2.6" fill="#7b8798" stroke="#0a0f1a" stroke-width=".8"/><rect x="20" y="62" width="10" height="15" rx="3" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1.2"/><circle cx="25" cy="69.5" r="2.6" fill="#7b8798" stroke="#0a0f1a" stroke-width=".8"/><rect x="20" y="76" width="10" height="15" rx="3" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1.2"/><circle cx="25" cy="83.5" r="2.6" fill="#7b8798" stroke="#0a0f1a" stroke-width=".8"/><rect x="68" y="16" width="10" height="15" rx="3" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1.2"/><circle cx="73" cy="23.5" r="2.6" fill="#7b8798" stroke="#0a0f1a" stroke-width=".8"/><rect x="68" y="30" width="10" height="15" rx="3" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1.2"/><circle cx="73" cy="37.5" r="2.6" fill="#7b8798" stroke="#0a0f1a" stroke-width=".8"/><rect x="68" y="62" width="10" height="15" rx="3" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1.2"/><circle cx="73" cy="69.5" r="2.6" fill="#7b8798" stroke="#0a0f1a" stroke-width=".8"/><rect x="68" y="76" width="10" height="15" rx="3" fill="#1a1d1f" stroke="#0a0f1a" stroke-width="1.2"/><circle cx="73" cy="83.5" r="2.6" fill="#7b8798" stroke="#0a0f1a" stroke-width=".8"/><rect x="32" y="18" width="32" height="60" rx="5" fill="url(#bl-body)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M40 88 L48 96 L56 88 Z" fill="#94a3b8" opacity="0"/><rect x="41" y="8" width="14" height="82" rx="6" fill="url(#bl-msl)" stroke="#0a0f1a" stroke-width="1.8"/><path d="M41 14 Q48 2 55 14 Z" fill="#f8fafc" stroke="#0a0f1a" stroke-width="1.4"/><rect x="41" y="20" width="14" height="3" fill="#dc2626"/><path d="M41 80 L34 90 L41 88 Z M55 80 L62 90 L55 88 Z" fill="#64748b" stroke="#0a0f1a" stroke-width="1"/><rect x="44" y="60" width="8" height="10" rx="1" fill="#1e293b" opacity=".6"/></svg>`
   ),
   artillery_howitzer: defineActor(
     'artillery_howitzer',
     'مدفعية هاوتزر ذاتية الحركة',
     '_vehicle',
-    { speed: 50, scale: 42, radius: 20 },
+    { speed: 50, scale: 42, radius: 20, fire: { mode: 'missile', label: 'قصف مدفعي', radius: 44, color: '#fb923c' } },
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="tk-hull" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2f3d25"/><stop offset=".5" stop-color="#5d7046"/><stop offset="1" stop-color="#2f3d25"/></linearGradient><linearGradient id="tk-trk" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1a1d1f"/><stop offset="1" stop-color="#3a3f44"/></linearGradient><radialGradient id="tk-tur" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#8ea173"/><stop offset="1" stop-color="#4b5d3a"/></radialGradient></defs><ellipse cx="52" cy="53" rx="32" ry="38" fill="#000" opacity=".32"/><rect x="18" y="14" width="13" height="68" rx="4" fill="url(#tk-trk)" stroke="#0a0f1a" stroke-width="2"/><rect x="65" y="14" width="13" height="68" rx="4" fill="url(#tk-trk)" stroke="#0a0f1a" stroke-width="2"/><path d="M18 26L8 34M18 70L8 62M78 26L88 34M78 70L88 62" stroke="#0a0f1a" stroke-width="3" stroke-linecap="round"/><rect x="28" y="12" width="40" height="72" rx="6" fill="url(#tk-hull)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><circle cx="48" cy="50" r="12" fill="url(#tk-tur)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><rect x="45" y="2" width="6" height="42" rx="2" fill="#2b3024" stroke="#0a0f1a" stroke-width="1.6"/><rect x="42.5" y="0" width="11" height="5" rx="1" fill="#1a1d1f"/><circle cx="48" cy="50" r="3" fill="#3f4a33"/></svg>`
   ),
   destroyer_ship: defineActor(
     'destroyer_ship',
     'مدمرة',
     '_ship',
-    { speed: 78, scale: 56, radius: 24 },
+    { speed: 78, scale: 56, radius: 24, fire: { mode: 'missile', label: 'إطلاق صاروخ كروز', radius: 56, color: '#38bdf8' } },
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="sh-hull" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3f4b5c"/><stop offset=".5" stop-color="#7b8798"/><stop offset="1" stop-color="#3f4b5c"/></linearGradient></defs><path d="M48 4 L60 18 L63 80 L56 92 L40 92 L33 80 L36 18 Z" fill="#000" opacity=".3" transform="translate(3 4)"/><path d="M48 4 L60 18 L63 80 L56 92 L40 92 L33 80 L36 18 Z" fill="url(#sh-hull)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><rect x="42" y="40" width="12" height="22" rx="2" fill="#94a3b8" stroke="#0a0f1a" stroke-width="1.4"/><rect x="44" y="34" width="8" height="8" rx="1" fill="#e2e8f0" stroke="#0a0f1a" stroke-width="1"/><line x1="48" y1="30" x2="48" y2="40" stroke="#0a0f1a" stroke-width="1.4"/><circle cx="48" cy="22" r="4.5" fill="#334155" stroke="#0a0f1a" stroke-width="1.4"/><rect x="46" y="14" width="4" height="8" fill="#1e293b"/><circle cx="48" cy="80" r="4.5" fill="#334155" stroke="#0a0f1a" stroke-width="1.4"/><rect x="46.5" y="84" width="3" height="7" fill="#1e293b"/><rect x="38" y="56" width="6" height="6" fill="#1e293b"/><rect x="52" y="56" width="6" height="6" fill="#1e293b"/><rect x="38" y="66" width="6" height="6" fill="#1e293b"/><rect x="52" y="66" width="6" height="6" fill="#1e293b"/><circle cx="48" cy="66" r="3" fill="#dc2626" opacity=".5"/><path d="M42 16 L48 4" stroke="#f8fafc" stroke-width="1" opacity=".5"/><path d="M46 88 Q48 96 44 100 M52 88 Q50 96 54 100" stroke="#e2e8f0" stroke-width="1.2" fill="none" opacity=".35"/></svg>`
   ),
   aircraft_carrier: defineActor(
@@ -82,7 +82,7 @@ export const DEMO_ACTORS: Record<string, ActorPack> = {
     'submarine',
     'غواصة',
     '_ship',
-    { speed: 60, scale: 46, radius: 20 },
+    { speed: 60, scale: 46, radius: 20, fire: { mode: 'missile', label: 'إطلاق صاروخ من الغواصة', radius: 50, color: '#22d3ee' } },
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="sb-hull" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1e293b"/><stop offset=".5" stop-color="#475569"/><stop offset="1" stop-color="#1e293b"/></linearGradient></defs><ellipse cx="51" cy="52" rx="16" ry="42" fill="#000" opacity=".3"/><ellipse cx="48" cy="48" rx="15" ry="42" fill="url(#sb-hull)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M40 22 Q48 14 56 22 L56 40 L40 40 Z" fill="#475569" stroke="#0a0f1a" stroke-width="1.8"/><rect x="44" y="28" width="8" height="5" rx="1" fill="#1e293b"/><path d="M48 6 L44 16 M48 6 L52 16" stroke="#0a0f1a" stroke-width="1.2"/><path d="M24 84 L72 84 M24 12 L72 12" stroke="#0a0f1a" stroke-width="1.6" opacity=".0"/><path d="M30 68 L40 62 M66 68 L56 62 M32 30 L42 36 M64 30 L54 36" stroke="#0a0f1a" stroke-width="1.6" stroke-linecap="round"/><path d="M48 44 L48 74" stroke="#cbd5e1" stroke-width="1.4" opacity=".35"/></svg>`
   ),
   oil_tanker: defineActor(
@@ -96,21 +96,21 @@ export const DEMO_ACTORS: Record<string, ActorPack> = {
     'fighter_jet',
     'مقاتلة نفاثة',
     '_air',
-    { speed: 205, scale: 48, radius: 22 },
+    { speed: 205, scale: 48, radius: 22, fire: { mode: 'airstrike', label: 'قصف جوي', radius: 62, color: '#ef4444' } },
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="jt-body" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#94a3b8"/><stop offset=".5" stop-color="#e2e8f0"/><stop offset="1" stop-color="#94a3b8"/></linearGradient><linearGradient id="jt-wing" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#cbd5e1"/><stop offset="1" stop-color="#64748b"/></linearGradient></defs><g opacity=".3" transform="translate(4 6)"><path d="M48 6 L53 22 L54 60 L58 74 L48 70 L38 74 L42 60 L43 22 Z"/><path d="M43 40 L14 62 L16 68 L43 60 Z M53 40 L82 62 L80 68 L53 60 Z"/></g><path d="M43 40 L14 62 L16 68 L43 60 Z" fill="url(#jt-wing)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M53 40 L82 62 L80 68 L53 60 Z" fill="url(#jt-wing)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M44 70 L36 84 L40 86 L46 74 Z M52 70 L60 84 L56 86 L50 74 Z" fill="#475569" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M48 6 L53 22 L54 60 L58 74 L48 70 L38 74 L42 60 L43 22 Z" fill="url(#jt-body)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><ellipse cx="48" cy="30" rx="4.2" ry="8" fill="#38bdf8" stroke="#0a0f1a" stroke-width="1.2"/><path d="M44 24 L52 24" stroke="#e0f2fe" stroke-width="1" opacity=".6"/><path d="M46 72 L50 72 L49 78 L47 78 Z" fill="#f97316" opacity=".7"/><circle cx="48" cy="60" r="0" fill="none"/><rect x="45.5" y="66" width="5" height="3" fill="#0a0f1a" opacity=".6"/></svg>`
   ),
   stealth_bomber: defineActor(
     'stealth_bomber',
     'قاذفة شبحية',
     '_air',
-    { speed: 180, scale: 56, radius: 26 },
+    { speed: 180, scale: 56, radius: 26, fire: { mode: 'airstrike', label: 'قصف بالقنابل الثقيلة', radius: 90, color: '#ef4444' } },
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="sb-wing" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4b5563"/><stop offset="1" stop-color="#1f2937"/></linearGradient></defs><path d="M48 14 L86 66 L70 74 L60 70 L48 80 L36 70 L26 74 L10 66 Z" fill="#000" opacity=".32" transform="translate(4 5)"/><path d="M48 14 L86 66 L70 74 L60 70 L48 80 L36 70 L26 74 L10 66 Z" fill="url(#sb-wing)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M48 14 L60 58 L48 80 L36 58 Z" fill="#334155" opacity=".55"/><path d="M48 14 L48 80" stroke="#0a0f1a" stroke-width="1" opacity=".5"/><path d="M46 30 L50 30 L50 40 L46 40 Z" fill="#38bdf8" opacity=".75" stroke="#0a0f1a" stroke-width=".8"/></svg>`
   ),
   attack_heli: defineActor(
     'attack_heli',
     'مروحية هجومية',
     '_heli',
-    { speed: 140, scale: 46, radius: 21 },
+    { speed: 140, scale: 46, radius: 21, fire: { mode: 'airstrike', label: 'صواريخ هجومية', radius: 48, color: '#f87171' } },
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="ah-body" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3b4a2e"/><stop offset=".5" stop-color="#6b7f52"/><stop offset="1" stop-color="#3b4a2e"/></linearGradient></defs><ellipse cx="51" cy="50" rx="14" ry="24" fill="#000" opacity=".3"/><rect x="18" y="40" width="60" height="6" rx="3" fill="#3b4a2e" stroke="#0a0f1a" stroke-width="1.6"/><rect x="16" y="38" width="8" height="10" rx="2" fill="#dc2626" stroke="#0a0f1a" stroke-width="1"/><rect x="72" y="38" width="8" height="10" rx="2" fill="#dc2626" stroke="#0a0f1a" stroke-width="1"/><rect x="16" y="46" width="8" height="10" rx="2" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="1"/><rect x="72" y="46" width="8" height="10" rx="2" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="1"/><ellipse cx="48" cy="46" rx="13" ry="22" fill="url(#ah-body)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M42 26 Q48 18 54 26 L54 34 L42 34 Z" fill="#38bdf8" opacity=".8" stroke="#0a0f1a" stroke-width="1.2"/><rect x="45" y="64" width="6" height="26" rx="2" fill="#4b5d3a" stroke="#0a0f1a" stroke-width="1.4"/><ellipse cx="48" cy="90" rx="6" ry="2.4" fill="#2f3d25" stroke="#0a0f1a" stroke-width="1"/><circle cx="48" cy="44" r="4" fill="#1e293b" stroke="#0a0f1a" stroke-width="1.2"/></svg>`
   ),
   transport_plane: defineActor(
@@ -124,7 +124,7 @@ export const DEMO_ACTORS: Record<string, ActorPack> = {
     'drone',
     'طائرة مسيّرة',
     '_air',
-    { speed: 120, scale: 30, radius: 14 },
+    { speed: 120, scale: 30, radius: 14, fire: { mode: 'airstrike', label: 'ضربة مسيّرة', radius: 34, color: '#fca5a5' } },
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="dr-w" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#cbd5e1"/><stop offset="1" stop-color="#64748b"/></linearGradient><linearGradient id="dr-b" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#64748b"/><stop offset=".5" stop-color="#e2e8f0"/><stop offset="1" stop-color="#64748b"/></linearGradient></defs><path d="M48 18 L84 46 L84 52 L48 46 L12 52 L12 46 Z" fill="#000" opacity=".3" transform="translate(3 5)"/><path d="M48 18 L84 46 L84 52 L48 46 L12 52 L12 46 Z" fill="url(#dr-w)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><ellipse cx="48" cy="48" rx="7" ry="20" fill="url(#dr-b)" stroke="#0a0f1a" stroke-width="2.2" stroke-linejoin="round"/><path d="M32 66 L64 66 L60 72 L36 72 Z" fill="#475569" stroke="#0a0f1a" stroke-width="1.2"/><circle cx="48" cy="30" r="3" fill="#38bdf8" stroke="#0a0f1a" stroke-width=".8"/></svg>`
   ),
   military_base: defineActor(

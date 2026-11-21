@@ -366,14 +366,19 @@ export class StudioEngine {
       p.progress = Math.min(1, p.progress + DT / Math.max(0.15, p.durationSec));
       p.x = p.startX + (p.targetX - p.startX) * p.progress;
       p.y = p.startY + (p.targetY - p.startY) * p.progress;
-      p.altitude = p.mode === 'missile' ? Math.sin(p.progress * Math.PI) * 1.65 : (1 - p.progress) * 0.9;
+      p.altitude =
+        p.mode === 'missile'
+          ? Math.sin(p.progress * Math.PI) * 1.65
+          : p.mode === 'bomb'
+            ? (1 - p.progress) * 0.9
+            : 0;
 
       if (p.progress >= 1) {
         this.triggerExplosion(
           p.targetX,
           p.targetY,
           p.radius,
-          p.mode === 'missile' ? 'missile' : 'airstrike',
+          p.mode === 'bomb' ? 'airstrike' : 'missile',
           p.color,
           p.faction
         );
@@ -683,7 +688,7 @@ export class StudioEngine {
         } else if (ent.kind === 'ship') this.emitSound('ship_horn');
         else this.emitSound('move_order');
       } else if (ord.type === 'strike') {
-        const radius = ord.radius ?? (ord.mode === 'missile' ? 78 : 62);
+        const radius = ord.radius ?? (ord.mode === 'missile' ? 78 : ord.mode === 'direct' ? 22 : ord.mode === 'gunfire' ? 9 : 62);
         const color = ord.color ?? (ord.mode === 'missile' ? '#f97316' : '#ef4444');
         const attacker = ord.attackerId ? this.entities.get(ord.attackerId) : undefined;
         const faction = ord.faction ?? attacker?.faction ?? 'blue';
@@ -711,26 +716,48 @@ export class StudioEngine {
             attacker.angle = Math.atan2(ord.to.y - attacker.y, ord.to.x - attacker.x);
           }
           const dist = Math.hypot(ord.to.x - launchPt.x, ord.to.y - launchPt.y);
-          const dur = ord.mode === 'missile' ? Math.max(0.85, Math.min(2.6, dist / 240)) : Math.max(0.45, Math.min(1.2, dist / 320));
-          this.projectiles.push({
-            id: `proj_${++this.autoCounter}`,
-            mode: ord.mode === 'missile' ? 'missile' : 'bomb',
-            x: launchPt.x,
-            y: launchPt.y,
-            prevX: launchPt.x,
-            prevY: launchPt.y,
-            startX: launchPt.x,
-            startY: launchPt.y,
-            targetX: ord.to.x,
-            targetY: ord.to.y,
-            altitude: 0.1,
-            progress: 0,
-            durationSec: dur,
-            radius,
-            color,
-            faction
-          });
-          this.emitSound(ord.mode === 'missile' ? 'missile_launch' : 'jet_takeoff');
+          // الرصاص: عدة طلقات متقاربة حول الهدف بإزاحات ثابتة (حتمية لإعادة التشغيل)
+          const shots: Array<[number, number]> =
+            ord.mode === 'gunfire' ? [[0, 0], [-9, 5], [7, -6], [-4, -9], [10, 7]] : [[0, 0]];
+          const pType: ProjectileState['mode'] =
+            ord.mode === 'missile' ? 'missile' : ord.mode === 'direct' ? 'direct' : ord.mode === 'gunfire' ? 'gunfire' : 'bomb';
+          const dur =
+            ord.mode === 'missile'
+              ? Math.max(0.85, Math.min(2.6, dist / 240))
+              : ord.mode === 'direct'
+                ? Math.max(0.16, Math.min(0.5, dist / 900))
+                : ord.mode === 'gunfire'
+                  ? Math.max(0.1, Math.min(0.3, dist / 1400))
+                  : Math.max(0.45, Math.min(1.2, dist / 320));
+          for (const [ox, oy] of shots) {
+            this.projectiles.push({
+              id: `proj_${++this.autoCounter}`,
+              mode: pType,
+              x: launchPt.x,
+              y: launchPt.y,
+              prevX: launchPt.x,
+              prevY: launchPt.y,
+              startX: launchPt.x,
+              startY: launchPt.y,
+              targetX: ord.to.x + ox,
+              targetY: ord.to.y + oy,
+              altitude: pType === 'direct' || pType === 'gunfire' ? 0 : 0.1,
+              progress: 0,
+              durationSec: dur,
+              radius,
+              color,
+              faction
+            });
+          }
+          this.emitSound(
+            ord.mode === 'missile'
+              ? 'missile_launch'
+              : ord.mode === 'direct'
+                ? 'cannon_fire'
+                : ord.mode === 'gunfire'
+                  ? 'rifle_fire'
+                  : 'jet_takeoff'
+          );
         }
       } else if (ord.type === 'remove') {
         this.removeEntityWithCallouts(ord.entityId);

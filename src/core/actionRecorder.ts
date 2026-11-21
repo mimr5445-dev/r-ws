@@ -119,7 +119,7 @@ export class ActionRecorder {
   }
 
   recordStrike(
-    mode: 'airstrike' | 'missile',
+    mode: 'airstrike' | 'missile' | 'direct' | 'gunfire',
     to: Point,
     attacker?: string,
     from?: Point,
