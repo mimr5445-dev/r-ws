@@ -1219,26 +1219,26 @@ export default function App() {
       className="relative flex flex-col h-[100dvh] w-full overflow-hidden bg-[#090f1a] text-slate-100 md:mx-auto md:my-4 md:w-[390px] md:h-[844px] md:max-h-[calc(100dvh-2rem)] md:rounded-[2.25rem] md:border-4 md:border-slate-800 md:shadow-2xl"
     >
       {toolsOpen && (
-        <div className="absolute inset-0 z-30 bg-black/50" onClick={() => setToolsOpen(false)} aria-hidden="true" />
+        <div className="absolute inset-0 z-30" onClick={() => setToolsOpen(false)} aria-hidden="true" />
       )}
       <div
-        className={`absolute inset-x-0 bottom-0 z-40 h-[85%] flex flex-col rounded-t-2xl border-t border-slate-700 bg-slate-900 shadow-2xl transition-transform duration-300 ${
-          toolsOpen ? 'translate-y-0' : 'translate-y-full pointer-events-none'
+        className={`absolute left-3 top-14 z-40 flex h-[min(68dvh,560px)] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl origin-top-left transition-all duration-200 ${
+          toolsOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
         }`}
         aria-hidden={!toolsOpen}
       >
-        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800 shrink-0">
-          <span className="text-sm font-semibold text-sky-300">لوحة الأدوات</span>
+        <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800 shrink-0">
+          <span className="text-sm font-semibold text-sky-300">الأدوات</span>
           <button
             type="button"
             onClick={() => setToolsOpen(false)}
-            aria-label="إغلاق لوحة الأدوات"
+            aria-label="إغلاق الأدوات"
             className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="flex-1 min-h-0 overflow-hidden">
+        <div className="absolute inset-x-0 bottom-0 top-10">
       <StudioSidebar
         activeTab={activeTab}
         onChangeTab={setActiveTab}
