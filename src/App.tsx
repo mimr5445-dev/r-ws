@@ -1192,7 +1192,7 @@ export default function App() {
         ? `${activeRegionObj.nameAr} (${activeRegionObj.name})`
         : activeRegionObj.name
       : activeMap.geoLevel === 'world'
-        ? 'مرّر على دولة للتحديد، وانقر مرتين للدخول للمحافظات'
+        ? ''
         : `عدد المحافظات/المناطق: ${Object.keys(activeMap.zones).length}`;
 
   const renderStudioSidebar = (view: 'tools' | 'units') => (
@@ -1502,12 +1502,14 @@ export default function App() {
                     ? `🌍 العالم ◂ ${activeMap.title.replace(' — المحافظات', '')}`
                     : '🌍 العالم'}
                 </span>
-                <span
-                  id="geoHoverLabel"
-                  className="bg-slate-900 border border-slate-700 text-slate-200 px-2 py-0.5 rounded truncate max-w-[260px] sm:max-w-[380px]"
-                >
-                  {geoHoverText}
-                </span>
+                {geoHoverText && (
+                  <span
+                    id="geoHoverLabel"
+                    className="bg-slate-900 border border-slate-700 text-slate-200 px-2 py-0.5 rounded truncate max-w-[260px] sm:max-w-[380px]"
+                  >
+                    {geoHoverText}
+                  </span>
+                )}
                 {activeMap.geoLevel === 'world' && selectedRegionId && selectedRegionObj?.iso3 && (
                   <button
                     type="button"
