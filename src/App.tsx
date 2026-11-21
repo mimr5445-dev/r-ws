@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as yaml from 'js-yaml';
-import { Eye, EyeOff, Layers, Maximize2, Pause, Play, Wrench, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Eye, EyeOff, Layers, Maximize2, Pause, Play, Truck, Wrench, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { ActionRecorder } from './core/actionRecorder';
 import { buildAiScenarioPrompt, generateCatalogMarkdown } from './core/catalog';
 import { DT, StudioEngine, TICK_RATE } from './core/engine';
@@ -24,17 +24,12 @@ import { studioDb } from './storage/studioDb';
 import { MapEditTool } from './components/PackBuilderPanel';
 import { SpecModal } from './components/SpecModal';
 import { StudioSidebar } from './components/StudioSidebar';
-import airSeaYaml from './scenarios/air_sea_strike.scenario.yaml?raw';
-import straitYaml from './scenarios/strait_crisis.scenario.yaml?raw';
-import valleyYaml from './scenarios/valley_advance.scenario.yaml?raw';
-import worldYaml from './scenarios/world_demo.scenario.yaml?raw';
 
-const PRESET_SCENARIOS: SavedScenarioRecord[] = [
-  { id: 'preset_air_sea', title: 'عمليات حاملة الطائرات والقصف الجوي', mapId: 'geopolitics_strait', yaml: airSeaYaml, source: 'preset', updatedAt: 4 },
-  { id: 'preset_world', title: 'الملاحة العالمية الحقيقية', mapId: 'world_live', yaml: worldYaml, source: 'preset', updatedAt: 3 },
-  { id: 'preset_strait', title: 'أزمة المضيق البحري', mapId: 'geopolitics_strait', yaml: straitYaml, source: 'preset', updatedAt: 2 },
-  { id: 'preset_valley', title: 'عملية عبور الجسر', mapId: 'tactical_valley', yaml: valleyYaml, source: 'preset', updatedAt: 1 }
-];
+const BLANK_SCENARIO_YAML = `meta:
+  title: لوحة فارغة
+  map: world_live
+timeline: []
+`;
 
 const FACTION_HEX: Record<Faction, string> = {
   blue: '#38bdf8',
@@ -103,8 +98,8 @@ export default function App() {
 
   const [packVersion, setPackVersion] = useState(0);
   const [activeTab, setActiveTab] = useState<'play' | 'pack'>('play');
-  const [selectedScenarioId, setSelectedScenarioId] = useState<string>('preset_air_sea');
-  const [yamlText, setYamlText] = useState(airSeaYaml);
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string>('');
+  const [yamlText, setYamlText] = useState(BLANK_SCENARIO_YAML);
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
   const [muted, setMuted] = useState(false);
@@ -124,13 +119,14 @@ export default function App() {
   const [specOpen, setSpecOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [activeMap, setActiveMap] = useState<MapPack>(
-    registryRef.current.maps.world_live ?? registryRef.current.maps.geopolitics_strait
+    registryRef.current.maps.world_live
   );
   const [hoveredRegionId, setHoveredRegionId] = useState<string | null>(null);
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
   const [geoLoadingMsg, setGeoLoadingMsg] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [unitsOpen, setUnitsOpen] = useState(false);
   const [mapToolsOpen, setMapToolsOpen] = useState(false);
 
   // Live ActionRecorder UI state
@@ -422,13 +418,6 @@ export default function App() {
       }
     };
 
-    renderer.onMapPaint = (pt: Point) => {
-      const tool = mapToolRef.current;
-      if (tool === 'paint_land') paintNavCell(pt, 0);
-      else if (tool === 'paint_sea') paintNavCell(pt, 1);
-      else if (tool === 'paint_block') paintNavCell(pt, 2);
-    };
-
     renderer.onMapClick = (pt: Point, hitId: string | null, shiftKey = false) => {
       const eng = engineRef.current;
       const reg = registryRef.current;
@@ -593,7 +582,7 @@ export default function App() {
 
     const boot = async () => {
       const reg = registryRef.current!;
-      await reg.init(PRESET_SCENARIOS);
+      await reg.init([]);
       await renderer.init(host);
       if (cancelled) return;
 
@@ -621,9 +610,7 @@ export default function App() {
       } else if (lastMapId && reg.maps[lastMapId]) {
         await openEmptyMapBoard(lastMapId);
       } else {
-        setSelectedScenarioId('preset_world');
-        setYamlText(worldYaml);
-        await loadScenario(worldYaml, null, 'preset_world');
+        await openEmptyMapBoard('world_live');
       }
 
       let accumulator = 0;
@@ -1208,38 +1195,9 @@ export default function App() {
         ? 'مرّر على دولة للتحديد، وانقر مرتين للدخول للمحافظات'
         : `عدد المحافظات/المناطق: ${Object.keys(activeMap.zones).length}`;
 
-  return (
-    <div
-      data-testid="studio-root"
-      data-playing={String(playing)}
-      data-tick={hudState.tick}
-      data-entities={hudState.entityCount}
-      data-map={activeMap.id}
-      data-recording={String(actionRecording)}
-      className="relative flex flex-col h-[100dvh] w-full overflow-hidden bg-[#090f1a] text-slate-100 md:mx-auto md:my-4 md:w-[390px] md:h-[844px] md:max-h-[calc(100dvh-2rem)] md:rounded-[2.25rem] md:border-4 md:border-slate-800 md:shadow-2xl"
-    >
-      {toolsOpen && (
-        <div className="absolute inset-0 z-30" onClick={() => setToolsOpen(false)} aria-hidden="true" />
-      )}
-      <div
-        className={`absolute left-3 top-14 z-40 flex h-[min(68dvh,560px)] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl origin-top-left transition-all duration-200 ${
-          toolsOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
-        }`}
-        aria-hidden={!toolsOpen}
-      >
-        <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800 shrink-0">
-          <span className="text-sm font-semibold text-sky-300">الأدوات</span>
-          <button
-            type="button"
-            onClick={() => setToolsOpen(false)}
-            aria-label="إغلاق الأدوات"
-            className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="absolute inset-x-0 bottom-0 top-10">
+  const renderStudioSidebar = (view: 'tools' | 'units') => (
       <StudioSidebar
+        view={view}
         activeTab={activeTab}
         onChangeTab={setActiveTab}
         maps={reg.maps}
@@ -1356,6 +1314,94 @@ export default function App() {
         onImportPackFile={handleImportPackFile}
         packNotice={packNotice}
       />
+  );
+
+  return (
+    <div
+      data-testid="studio-root"
+      data-playing={String(playing)}
+      data-tick={hudState.tick}
+      data-entities={hudState.entityCount}
+      data-map={activeMap.id}
+      data-recording={String(actionRecording)}
+      className="relative flex flex-col h-[100dvh] w-full overflow-hidden bg-[#090f1a] text-slate-100 md:mx-auto md:my-4 md:w-[390px] md:h-[844px] md:max-h-[calc(100dvh-2rem)] md:rounded-[2.25rem] md:border-4 md:border-slate-800 md:shadow-2xl"
+    >
+      {(unitsOpen || toolsOpen) && (
+        <div
+          className="absolute inset-0 z-30"
+          onClick={() => {
+            setUnitsOpen(false);
+            setToolsOpen(false);
+          }}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Left edge: mechanisms and equipment */}
+      <button
+        type="button"
+        onClick={() => setUnitsOpen(true)}
+        aria-label="فتح الآليات والمعدات"
+        title="الآليات والمعدات"
+        className={`absolute left-0 top-1/2 z-40 -translate-y-1/2 flex h-12 w-9 items-center justify-center rounded-r-lg border border-l-0 border-slate-700 bg-slate-900/95 text-sky-300 shadow-lg transition-opacity ${
+          unitsOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
+        }`}
+      >
+        <Truck className="w-4 h-4" />
+      </button>
+      <div
+        className={`absolute left-0 top-16 bottom-[4.5rem] z-40 flex w-[min(300px,85%)] flex-col overflow-hidden rounded-r-xl border border-l-0 border-slate-700 bg-slate-900 shadow-2xl transition-transform duration-200 ${
+          unitsOpen ? 'translate-x-0' : '-translate-x-full pointer-events-none'
+        }`}
+        aria-hidden={!unitsOpen}
+      >
+        <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800 shrink-0">
+          <span className="text-sm font-semibold text-sky-300">الآليات والمعدات</span>
+          <button
+            type="button"
+            onClick={() => setUnitsOpen(false)}
+            aria-label="إغلاق الآليات والمعدات"
+            className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="relative flex-1 min-h-0">
+          <div className="absolute inset-0">{renderStudioSidebar('units')}</div>
+        </div>
+      </div>
+
+      {/* Right edge: tools */}
+      <button
+        type="button"
+        onClick={() => setToolsOpen(true)}
+        aria-label="فتح لوحة الأدوات"
+        title="لوحة الأدوات"
+        className={`absolute right-0 top-1/2 z-40 -translate-y-1/2 flex h-12 w-9 items-center justify-center rounded-l-lg border border-r-0 border-slate-700 bg-slate-900/95 text-sky-300 shadow-lg transition-opacity ${
+          toolsOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
+        }`}
+      >
+        <Wrench className="w-4 h-4" />
+      </button>
+      <div
+        className={`absolute right-0 top-16 bottom-[4.5rem] z-40 flex w-[min(320px,88%)] flex-col overflow-hidden rounded-l-xl border border-r-0 border-slate-700 bg-slate-900 shadow-2xl transition-transform duration-200 ${
+          toolsOpen ? 'translate-x-0' : 'translate-x-full pointer-events-none'
+        }`}
+        aria-hidden={!toolsOpen}
+      >
+        <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800 shrink-0">
+          <span className="text-sm font-semibold text-sky-300">لوحة الأدوات</span>
+          <button
+            type="button"
+            onClick={() => setToolsOpen(false)}
+            aria-label="إغلاق لوحة الأدوات"
+            className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="relative flex-1 min-h-0">
+          <div className="absolute inset-0">{renderStudioSidebar('tools')}</div>
         </div>
       </div>
 
@@ -1523,15 +1569,6 @@ export default function App() {
           aria-label="شريط الزمن التفاعلي"
           className="bg-slate-900 border-t border-slate-800 px-3 py-2 flex items-center gap-2 text-xs shrink-0"
         >
-          <button
-            type="button"
-            onClick={() => setToolsOpen(true)}
-            aria-label="فتح لوحة الأدوات"
-            title="فتح لوحة الأدوات"
-            className="p-2 rounded-lg bg-slate-800 text-sky-300 hover:bg-slate-700 shrink-0"
-          >
-            <Wrench className="w-4 h-4" />
-          </button>
           <button
             type="button"
             onClick={() => setPlaying((p) => !p)}
