@@ -60,14 +60,19 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
+function easeOutCubic(t: number): number {
+  const clamped = Math.max(0, Math.min(1, t));
+  return 1 - Math.pow(1 - clamped, 3);
+}
+
 function lerpAngle(a: number, b: number, t: number): number {
   return a + normalizeAngleDiff(b, a) * t;
 }
 
 const FACTION_COLOR: Record<Faction, number> = {
   blue: 0x38bdf8,
-  red: 0xef4444,
-  neutral: 0x94a3b8
+  red: 0xf87171,
+  neutral: 0xcbd5e1
 };
 
 interface Particle {
@@ -103,10 +108,15 @@ interface EntityView {
   baseSpriteScale: number;
   isElongated: boolean;
   shadow: Graphics;
+  glow: Graphics;
   factionHalo: Graphics;
   ring: Graphics;
   buildArc: Graphics;
   rotor?: Graphics;
+  visX: number;
+  visY: number;
+  visAngle: number;
+  initialized: boolean;
 }
 
 interface CalloutView {
@@ -136,6 +146,9 @@ export class StudioRenderer {
   private projectileGraphics = new Graphics();
   private explosionGraphics = new Graphics();
   private calloutLayer = new Container();
+  private ambientGraphics = new Graphics();
+  private diagramLayer = new Container();
+  private diagramBuilt = false;
 
   private actorTextures = new Map<string, Texture>();
   private entityViews = new Map<string, EntityView>();
@@ -146,6 +159,7 @@ export class StudioRenderer {
   private camX = 600;
   private camY = 400;
   private camZoom = 1;
+  private manualCamGoal: { x: number; y: number; zoom: number } | null = null;
   private lastCamSeq = -1;
   private currentTargetSeq = 0;
   private dragging = false;
@@ -163,6 +177,7 @@ export class StudioRenderer {
   public selectedRegionId: string | null = null;
   public hideUIHelpers = false;
   public showAnchors = true;
+  public showArchitectureDiagram = false;
   public editorOverlay: EditorOverlayState = {
     enabled: false,
     showNavGrid: false,
@@ -187,7 +202,7 @@ export class StudioRenderer {
     try {
       await this.app.init({
         resizeTo: host,
-        backgroundColor: 0x090f1a,
+        backgroundColor: 0x0b1220,
         antialias: true,
         preference: 'webgl',
         preserveDrawingBuffer: true
@@ -195,7 +210,7 @@ export class StudioRenderer {
     } catch {
       await this.app.init({
         resizeTo: host,
-        backgroundColor: 0x090f1a,
+        backgroundColor: 0x0b1220,
         antialias: true,
         preserveDrawingBuffer: true
       });
@@ -224,9 +239,11 @@ export class StudioRenderer {
       this.entityLayer,
       this.projectileGraphics,
       this.explosionGraphics,
+      this.ambientGraphics,
       this.calloutLayer
     );
-    this.app.stage.addChild(this.world);
+    this.diagramLayer.visible = false;
+    this.app.stage.addChild(this.world, this.diagramLayer);
     this.setupPointerEvents();
   }
 
@@ -406,25 +423,38 @@ export class StudioRenderer {
     };
   }
 
+  setArchitectureDiagramVisible(visible: boolean): void {
+    this.showArchitectureDiagram = visible;
+    this.diagramLayer.visible = visible;
+  }
+
   zoomBy(factor: number): void {
     this.lastCamSeq = this.currentTargetSeq;
-    this.camZoom = Math.max(0.35, Math.min(4, this.camZoom * factor));
+    const baseZoom = this.manualCamGoal ? this.manualCamGoal.zoom : this.camZoom;
+    const targetZoom = Math.max(0.35, Math.min(4, baseZoom * factor));
+    const clamped = this.computeClampedCameraGoal(this.camX, this.camY, targetZoom);
+    this.manualCamGoal = { x: clamped.x, y: clamped.y, zoom: targetZoom };
   }
 
   resetCamera(): void {
     this.lastCamSeq = this.currentTargetSeq;
-    this.camX = this.mapWidth / 2;
-    this.camY = this.mapHeight / 2;
     const sw = Math.max(1, this.app.screen.width);
     const sh = Math.max(1, this.app.screen.height);
-    this.camZoom = Math.min(sw / this.mapWidth, sh / this.mapHeight) * 0.94;
+    const targetZoom = Math.min(sw / this.mapWidth, sh / this.mapHeight) * 0.94;
+    this.manualCamGoal = {
+      x: this.mapWidth / 2,
+      y: this.mapHeight / 2,
+      zoom: targetZoom
+    };
   }
 
   resumeCameraTracking(): void {
+    this.manualCamGoal = null;
     this.lastCamSeq = -1;
   }
 
   syncCameraImmediate(engine: StudioEngine): void {
+    this.manualCamGoal = null;
     if (engine.cameraTarget) {
       this.currentTargetSeq = engine.cameraTarget.seq;
       const clamped = this.computeClampedCameraGoal(
@@ -571,10 +601,25 @@ export class StudioRenderer {
       this.currentTargetSeq = engine.cameraTarget.seq;
     }
 
-    if (engine.cameraTarget && engine.cameraTarget.seq !== this.lastCamSeq) {
+    if (this.manualCamGoal) {
+      const t = easeOutCubic(Math.min(1, frameDt * 8.5));
+      this.camX = lerp(this.camX, this.manualCamGoal.x, t);
+      this.camY = lerp(this.camY, this.manualCamGoal.y, t);
+      this.camZoom = lerp(this.camZoom, this.manualCamGoal.zoom, t);
+      if (
+        Math.hypot(this.camX - this.manualCamGoal.x, this.camY - this.manualCamGoal.y) < 0.4 &&
+        Math.abs(this.camZoom - this.manualCamGoal.zoom) < 0.002
+      ) {
+        this.camX = this.manualCamGoal.x;
+        this.camY = this.manualCamGoal.y;
+        this.camZoom = this.manualCamGoal.zoom;
+        this.manualCamGoal = null;
+      }
+    } else if (engine.cameraTarget && engine.cameraTarget.seq !== this.lastCamSeq) {
       const targetZoom = engine.cameraTarget.zoom;
       const goal = this.computeClampedCameraGoal(engine.cameraTarget.x, engine.cameraTarget.y, targetZoom);
-      const speedFactor = 1 - Math.exp((-frameDt * 3.6) / Math.max(0.25, engine.cameraTarget.durationSec));
+      const rawT = 1 - Math.exp((-frameDt * 3.6) / Math.max(0.25, engine.cameraTarget.durationSec));
+      const speedFactor = easeOutCubic(rawT);
       this.camX = lerp(this.camX, goal.x, speedFactor);
       this.camY = lerp(this.camY, goal.y, speedFactor);
       this.camZoom = lerp(this.camZoom, targetZoom, speedFactor);
@@ -741,10 +786,27 @@ export class StudioRenderer {
         this.entityLayer.addChild(view.container);
       }
 
-      const x = lerp(ent.prevX, ent.x, alpha);
-      const y = lerp(ent.prevY, ent.y, alpha);
+      const targetX = lerp(ent.prevX, ent.x, alpha);
+      const targetY = lerp(ent.prevY, ent.y, alpha);
       const alt = lerp(ent.prevAltitude, ent.altitude, alpha);
-      const smoothAng = lerpAngle(ent.prevAngle, ent.angle, alpha);
+      const targetAng = lerpAngle(ent.prevAngle, ent.angle, alpha);
+
+      if (!view.initialized || Math.hypot(targetX - view.visX, targetY - view.visY) > 120) {
+        view.visX = targetX;
+        view.visY = targetY;
+        view.visAngle = targetAng;
+        view.initialized = true;
+      } else {
+        const posEase = easeOutCubic(Math.min(1, frameDt * 18));
+        const angEase = easeOutCubic(Math.min(1, frameDt * 14));
+        view.visX = lerp(view.visX, targetX, posEase);
+        view.visY = lerp(view.visY, targetY, posEase);
+        view.visAngle = lerpAngle(view.visAngle, targetAng, angEase);
+      }
+
+      const x = view.visX;
+      const y = view.visY;
+      const smoothAng = view.visAngle;
 
       const entScale = this.lastUnitFactor * (ent.scaleMul ?? 1);
       view.container.position.set(x, y);
@@ -754,16 +816,38 @@ export class StudioRenderer {
       // الرسوم مرسومة وأنفها للأعلى، لذلك يُضاف 90 درجة إلى زاوية الاتجاه
       const facing = smoothAng + Math.PI / 2;
       if (ent.kind === 'air') {
-        view.shadow.position.set(12, 26);
+        view.shadow.position.set(10 + alt * 14, 18 + alt * 22);
         view.shadow.rotation = facing;
-        view.shadow.alpha = 0.32;
+        view.shadow.alpha = Math.max(0.18, 0.38 - alt * 0.12);
         view.factionHalo.rotation = facing;
         view.ring.rotation = facing;
       } else if (ent.kind === 'ship' || ent.kind === 'vehicle' || ent.kind === 'person') {
         view.shadow.position.set(2, ent.scale * 0.16);
         view.shadow.rotation = facing;
+        view.shadow.alpha = 0.38;
         view.factionHalo.rotation = facing;
         view.ring.rotation = facing;
+      }
+
+      // توهج واضح للعنصر المحدد أو النشط
+      const isSelected = !this.hideUIHelpers && this.selectedEntityId === ent.id;
+      const isActive = ent.isMoving || ent.buildProgress < 1;
+      view.glow.clear();
+      if (isSelected) {
+        const pulse = 0.8 + 0.2 * Math.sin(timeSec * 5.2);
+        const r = Math.max(18, ent.radius * 1.35);
+        view.glow
+          .circle(0, 0, r * 1.25)
+          .fill({ color: 0x22c55e, alpha: 0.14 * pulse })
+          .circle(0, 0, r * 0.92)
+          .fill({ color: 0x38bdf8, alpha: 0.22 * pulse })
+          .stroke({ width: 1.8, color: 0x4ade80, alpha: 0.65 * pulse });
+      } else if (isActive) {
+        const fCol = FACTION_COLOR[ent.faction] ?? 0xcbd5e1;
+        const r = Math.max(14, ent.radius * 1.15);
+        view.glow
+          .circle(0, 0, r)
+          .fill({ color: fCol, alpha: 0.1 });
       }
 
       if (ent.kind === 'person') {
@@ -1166,16 +1250,35 @@ export class StudioRenderer {
         cv.label.text = c.text;
         cv.lastText = c.text;
         cv.lastColor = c.color;
-        const w = cv.label.width + 20;
-        const h = 26;
+        const w = cv.label.width + 22;
+        const h = 28;
         cv.bg
           .clear()
-          .roundRect(-w / 2, -h / 2, w, h, 6)
-          .fill({ color: 0x0f172a, alpha: 0.94 })
-          .stroke({ width: 1.5, color: c.color });
+          .roundRect(-w / 2 + 1, -h / 2 + 2, w, h, 7)
+          .fill({ color: 0x020617, alpha: 0.55 })
+          .roundRect(-w / 2, -h / 2, w, h, 7)
+          .fill({ color: 0x0f172a, alpha: 0.96 })
+          .stroke({ width: 1.75, color: c.color });
       }
       cv.container.position.set(tx, ty);
       cv.container.scale.set(calloutScale);
+    }
+
+    // إضاءة محيطية ناعمة فوق المشهد
+    this.ambientGraphics.clear();
+    const cx = this.mapWidth / 2;
+    const cy = this.mapHeight / 2;
+    const ambR = Math.max(this.mapWidth, this.mapHeight) * 0.62;
+    this.ambientGraphics
+      .circle(cx, cy, ambR)
+      .fill({ color: 0x38bdf8, alpha: 0.028 })
+      .rect(0, 0, this.mapWidth, this.mapHeight)
+      .stroke({ width: 3, color: 0x1e293b, alpha: 0.7 });
+
+    // رسم توضيحي معماري مبسط عند طلبه
+    this.diagramLayer.visible = this.showArchitectureDiagram;
+    if (this.showArchitectureDiagram && !this.diagramBuilt) {
+      this.buildArchitectureDiagram();
     }
   }
 
@@ -1188,6 +1291,83 @@ export class StudioRenderer {
       .stroke({ width, color, alpha });
   }
 
+  private buildArchitectureDiagram(): void {
+    this.diagramBuilt = true;
+    this.diagramLayer.removeChildren();
+
+    const panelW = 540;
+    const panelH = 148;
+    const margin = 16;
+    const panel = new Container();
+    panel.position.set(margin, margin);
+
+    const bg = new Graphics()
+      .roundRect(0, 0, panelW, panelH, 10)
+      .fill({ color: 0x090f1a, alpha: 0.92 })
+      .stroke({ width: 1.5, color: 0x334155, alpha: 0.95 });
+    panel.addChild(bg);
+
+    const title = new Text({
+      text: 'Architecture Data Flow (engine.ts → studioRenderer.ts → UI)',
+      style: {
+        fontFamily: 'Inter, system-ui, sans-serif',
+        fontSize: 12,
+        fontWeight: '700',
+        fill: 0xf8fafc
+      }
+    });
+    title.position.set(14, 10);
+    panel.addChild(title);
+
+    const nodes = [
+      { title: 'Engine (engine.ts)', sub: 'State, A* Nav,\nPhysics, Timeline', x: 14, color: 0x38bdf8 },
+      { title: 'Renderer (studioRenderer)', sub: 'Lerp/Easing, Glow,\nShadows, PixiJS', x: 190, color: 0x4ade80 },
+      { title: 'UI (App.tsx)', sub: 'Controls, Inspector,\nScenario Timeline', x: 366, color: 0xfbbf24 }
+    ];
+
+    for (const n of nodes) {
+      const box = new Graphics()
+        .roundRect(n.x, 38, 158, 92, 8)
+        .fill({ color: 0x0f172a, alpha: 0.95 })
+        .stroke({ width: 1.5, color: n.color, alpha: 0.85 });
+      panel.addChild(box);
+
+      const nTitle = new Text({
+        text: n.title,
+        style: {
+          fontFamily: 'Inter, system-ui, sans-serif',
+          fontSize: 11,
+          fontWeight: '700',
+          fill: n.color
+        }
+      });
+      nTitle.position.set(n.x + 10, 48);
+      panel.addChild(nTitle);
+
+      const nSub = new Text({
+        text: n.sub,
+        style: {
+          fontFamily: 'Inter, system-ui, sans-serif',
+          fontSize: 10.5,
+          fill: 0xcbd5e1,
+          lineHeight: 15
+        }
+      });
+      nSub.position.set(n.x + 10, 72);
+      panel.addChild(nSub);
+    }
+
+    const arrows = new Graphics()
+      .moveTo(174, 84).lineTo(188, 84)
+      .moveTo(183, 79).lineTo(188, 84).lineTo(183, 89)
+      .moveTo(350, 84).lineTo(364, 84)
+      .moveTo(359, 79).lineTo(364, 84).lineTo(359, 89)
+      .stroke({ width: 2, color: 0x94a3b8, alpha: 0.9 });
+    panel.addChild(arrows);
+
+    this.diagramLayer.addChild(panel);
+  }
+
   private createEntityView(ent: EntityState): EntityView {
     const container = new Container();
     const tex = this.actorTextures.get(ent.actorId) ?? Texture.EMPTY;
@@ -1195,18 +1375,23 @@ export class StudioRenderer {
     const drawW = Math.max(ent.radius * 1.4, tex.width * ratio);
     const drawH = Math.max(ent.radius * 1.0, tex.height * ratio);
 
+    const shadowY = ent.kind === 'air' ? 8 : ent.scale * 0.16;
     const shadow = new Graphics()
-      .ellipse(0, ent.kind === 'air' ? 8 : ent.scale * 0.16, drawW * 0.44, drawH * 0.34)
-      .fill({ color: 0x000000, alpha: ent.kind === 'air' ? 0.38 : 0.32 });
+      .ellipse(0, shadowY, drawW * 0.52, drawH * 0.4)
+      .fill({ color: 0x020617, alpha: 0.18 })
+      .ellipse(0, shadowY, drawW * 0.38, drawH * 0.28)
+      .fill({ color: 0x000000, alpha: ent.kind === 'air' ? 0.34 : 0.28 });
+
+    const glow = new Graphics();
 
     const isElongated = drawW > drawH * 1.35;
     const hw = Math.max(12, drawW * 0.52);
     const hh = Math.max(10, drawH * 0.54);
     const factionHalo = new Graphics();
     const ring = new Graphics();
-    const fCol = FACTION_COLOR[ent.faction] ?? 0x94a3b8;
-    this.drawCornerBrackets(factionHalo, hw, hh, 5.5, fCol, 1.5, 0.52);
-    this.drawCornerBrackets(ring, hw + 4, hh + 4, 8, 0x22c55e, 2.2, 0.95);
+    const fCol = FACTION_COLOR[ent.faction] ?? 0xcbd5e1;
+    this.drawCornerBrackets(factionHalo, hw, hh, 5.5, fCol, 1.5, 0.58);
+    this.drawCornerBrackets(ring, hw + 4, hh + 4, 8, 0x4ade80, 2.2, 0.95);
     ring.visible = false;
     const buildArc = new Graphics();
 
@@ -1236,11 +1421,26 @@ export class StudioRenderer {
     }
 
     if (rotor) {
-      container.addChild(shadow, factionHalo, ring, sprite, rotor, buildArc);
+      container.addChild(shadow, glow, factionHalo, ring, sprite, rotor, buildArc);
     } else {
-      container.addChild(shadow, factionHalo, ring, sprite, buildArc);
+      container.addChild(shadow, glow, factionHalo, ring, sprite, buildArc);
     }
-    return { container, sprite, baseSpriteScale: ratio, isElongated, shadow, ring, factionHalo, buildArc, rotor };
+    return {
+      container,
+      sprite,
+      baseSpriteScale: ratio,
+      isElongated,
+      shadow,
+      glow,
+      ring,
+      factionHalo,
+      buildArc,
+      rotor,
+      visX: ent.x,
+      visY: ent.y,
+      visAngle: ent.angle,
+      initialized: false
+    };
   }
 
   destroy(): void {
