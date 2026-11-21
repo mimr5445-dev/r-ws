@@ -204,6 +204,7 @@ export class StudioRenderer {
     this.app.canvas.style.display = 'block';
     this.app.canvas.style.width = '100%';
     this.app.canvas.style.height = '100%';
+    this.app.canvas.style.touchAction = 'none';
     this.app.canvas.setAttribute('data-testid', 'studio-canvas');
     host.appendChild(this.app.canvas);
 
@@ -242,7 +243,30 @@ export class StudioRenderer {
   private setupPointerEvents(): void {
     const canvas = this.app.canvas;
 
+    // Active touch/mouse pointers, used for pinch-zoom and two-finger pan.
+    const pointers = new Map<number, { x: number; y: number }>();
+    let pinch: { dist: number; zoom: number; worldX: number; worldY: number } | null = null;
+
+    const pinchMetrics = () => {
+      const [a, b] = [...pointers.values()];
+      return {
+        dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+        mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+      };
+    };
+
     const onPointerDown = (e: PointerEvent) => {
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) {
+        const m = pinchMetrics();
+        const w = this.screenToWorld(m.mid.x, m.mid.y);
+        pinch = { dist: m.dist, zoom: this.camZoom, worldX: w.x, worldY: w.y };
+        this.dragging = false;
+        this.painting = false;
+        this.dragMoved = true;
+        return;
+      }
+      if (pointers.size > 2) return;
       if (this.editorOverlay.enabled && (e.shiftKey || (this.editorOverlay.paintActive && e.button === 0))) {
         this.painting = true;
         this.dragging = true;
@@ -257,6 +281,20 @@ export class StudioRenderer {
     };
 
     const onPointerMove = (e: PointerEvent) => {
+      if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch && pointers.size >= 2) {
+        const m = pinchMetrics();
+        const zoom = Math.max(0.35, Math.min(4, pinch.zoom * (m.dist / pinch.dist)));
+        const r = canvas.getBoundingClientRect();
+        const lx = m.mid.x - r.left;
+        const ly = m.mid.y - r.top;
+        // Keep the world point under the initial pinch midpoint anchored under the fingers.
+        this.camZoom = zoom;
+        this.camX = pinch.worldX - (lx - this.app.screen.width / 2) / zoom;
+        this.camY = pinch.worldY - (ly - this.app.screen.height / 2) / zoom;
+        this.lastCamSeq = this.currentTargetSeq;
+        return;
+      }
       if (!this.dragging) return;
       if (this.painting || (this.editorOverlay.enabled && e.shiftKey)) {
         this.onMapPaint?.(this.screenToWorld(e.clientX, e.clientY));
@@ -274,6 +312,15 @@ export class StudioRenderer {
     };
 
     const onPointerUp = (e: PointerEvent) => {
+      const wasPinching = pinch !== null;
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+      if (wasPinching) {
+        // Ending a pinch must not turn the remaining finger into a tap.
+        this.dragging = false;
+        this.dragMoved = true;
+        return;
+      }
       if (!this.dragging) return;
       const wasPainting = this.painting;
       this.dragging = false;
@@ -283,6 +330,14 @@ export class StudioRenderer {
         const hit = this.pickEntity(pt.x, pt.y);
         this.onMapClick?.(pt, hit, e.shiftKey);
       }
+    };
+
+    const onPointerCancel = (e: PointerEvent) => {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+      this.dragging = false;
+      this.painting = false;
+      this.dragMoved = true;
     };
 
     const onWheel = (e: WheelEvent) => {
@@ -314,6 +369,7 @@ export class StudioRenderer {
     canvas.addEventListener('dblclick', onCanvasDblClick);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
     canvas.addEventListener('wheel', onWheel, { passive: false });
 
     this.cleanupListeners.push(() => {
@@ -322,6 +378,7 @@ export class StudioRenderer {
       canvas.removeEventListener('dblclick', onCanvasDblClick);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
       canvas.removeEventListener('wheel', onWheel);
     });
   }
