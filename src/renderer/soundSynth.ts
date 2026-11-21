@@ -51,6 +51,69 @@ export class SoundSynth {
     try {
       const now = ctx.currentTime;
 
+      if (id === 'cannon_fire') {
+        // طلقة دبابة: ضربة منخفضة قوية وانفجار فوهة قصير
+        const boom = ctx.createOscillator();
+        const bg = ctx.createGain();
+        boom.type = 'sine';
+        boom.frequency.setValueAtTime(110, now);
+        boom.frequency.exponentialRampToValueAtTime(38, now + 0.3);
+        bg.gain.setValueAtTime(0.42, now);
+        bg.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+        boom.connect(bg);
+        this.connectOutput(ctx, bg);
+        boom.start(now);
+        boom.stop(now + 0.4);
+        if (this.noiseBuffer) {
+          const nz = ctx.createBufferSource();
+          nz.buffer = this.noiseBuffer;
+          const lp = ctx.createBiquadFilter();
+          lp.type = 'lowpass';
+          lp.frequency.setValueAtTime(1800, now);
+          lp.frequency.exponentialRampToValueAtTime(240, now + 0.25);
+          const ng = ctx.createGain();
+          ng.gain.setValueAtTime(0.35, now);
+          ng.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+          nz.connect(lp);
+          lp.connect(ng);
+          this.connectOutput(ctx, ng);
+          nz.start(now);
+          nz.stop(now + 0.32);
+        }
+        return;
+      }
+
+      if (id === 'rifle_fire') {
+        // طلقات بندقية حادة: طقطقة عالية قصيرة مع ارتداد خفيف
+        if (this.noiseBuffer) {
+          const nz = ctx.createBufferSource();
+          nz.buffer = this.noiseBuffer;
+          const hp = ctx.createBiquadFilter();
+          hp.type = 'highpass';
+          hp.frequency.setValueAtTime(1600, now);
+          const ng = ctx.createGain();
+          ng.gain.setValueAtTime(0.28, now);
+          ng.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+          nz.connect(hp);
+          hp.connect(ng);
+          this.connectOutput(ctx, ng);
+          nz.start(now);
+          nz.stop(now + 0.1);
+        }
+        const crack = ctx.createOscillator();
+        const cg = ctx.createGain();
+        crack.type = 'square';
+        crack.frequency.setValueAtTime(1900, now);
+        crack.frequency.exponentialRampToValueAtTime(400, now + 0.04);
+        cg.gain.setValueAtTime(0.08, now);
+        cg.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+        crack.connect(cg);
+        this.connectOutput(ctx, cg);
+        crack.start(now);
+        crack.stop(now + 0.06);
+        return;
+      }
+
       if (id === 'explosion') {
         // موجة انفجار عميقة + هدير شظايا واقعي
         const subOsc = ctx.createOscillator();

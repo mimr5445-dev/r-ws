@@ -909,6 +909,30 @@ export class StudioRenderer {
         .lineTo(p.targetX + tr + 3, p.targetY)
         .stroke({ width: 1.5, color: p.color, alpha: 0.75 * targetPulse });
 
+      if (p.mode === 'direct' || p.mode === 'gunfire') {
+        // قذيفة مباشرة أو طلقات: خط تتبع مستقيم سريع من فوهة الإطلاق إلى الهدف
+        const ux = p.targetX - p.startX;
+        const uy = p.targetY - p.startY;
+        const ul = Math.hypot(ux, uy) || 1;
+        const isDirect = p.mode === 'direct';
+        const tailLen = isDirect ? 54 : 22;
+        const tailX = gx - (ux / ul) * tailLen;
+        const tailY = gy - (uy / ul) * tailLen;
+        this.projectileGraphics
+          .moveTo(tailX, tailY)
+          .lineTo(gx, gy)
+          .stroke({ width: isDirect ? 6 : 3, color: p.color, alpha: 0.22 })
+          .moveTo(tailX, tailY)
+          .lineTo(gx, gy)
+          .stroke({ width: isDirect ? 2.6 : 1.4, color: isDirect ? 0xfef3c7 : 0xfef9c3, alpha: 0.95 });
+        if (p.progress < 0.12) {
+          this.projectileGraphics
+            .circle(p.startX, p.startY, isDirect ? 7 : 3)
+            .fill({ color: 0xfde68a, alpha: Math.max(0, 0.85 - p.progress * 4) });
+        }
+        continue;
+      }
+
       if (p.mode === 'missile') {
         // مسار دخان بالستي خلف الصاروخ
         const steps = 10;

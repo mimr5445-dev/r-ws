@@ -8,6 +8,7 @@ import { isPointNearWalkable } from './core/pathfinding';
 import {
   Faction,
   MapPack,
+  StrikeMode,
   NavCell,
   PackBundle,
   Point,
@@ -90,7 +91,7 @@ export default function App() {
   const mapToolRef = useRef<MapEditTool>('anchor');
   const pointNameRef = useRef<string>('');
   const pendingActionModeRef = useRef<
-    'none' | 'arrow_start' | 'arrow_end' | 'pulse' | 'strike_air' | 'strike_missile'
+    'none' | 'arrow_start' | 'arrow_end' | 'pulse' | 'strike_air' | 'strike_missile' | 'strike_direct' | 'strike_gunfire'
   >('none');
   const arrowStartPtRef = useRef<Point | null>(null);
 
@@ -106,7 +107,9 @@ export default function App() {
   const [recording, setRecording] = useState(false);
   const [unitScale, setUnitScale] = useState(1.0);
   const [activeTool, setActiveTool] = useState<string>('select');
-  const [strikeMode, setStrikeMode] = useState<'none' | 'airstrike' | 'missile'>('none');
+  const [strikeMode, setStrikeMode] = useState<'none' | StrikeMode>('none');
+  const [armedActorId, setArmedActorId] = useState<string | null>(null);
+  const armedActorRef = useRef<string | null>(null);
   const [sandboxFaction, setSandboxFaction] = useState<Faction>('blue');
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [selectedEntityScale, setSelectedEntityScale] = useState<number>(1.0);
@@ -201,6 +204,8 @@ export default function App() {
       if (e.key === 'Escape') {
         pendingActionModeRef.current = 'none';
         arrowStartPtRef.current = null;
+        armedActorRef.current = null;
+        setArmedActorId(null);
         setStrikeMode('none');
         if (rendererRef.current) {
           rendererRef.current.selectedEntityId = null;
@@ -474,21 +479,41 @@ export default function App() {
       if (
         pendingActionModeRef.current === 'strike_air' ||
         pendingActionModeRef.current === 'strike_missile' ||
+        pendingActionModeRef.current === 'strike_direct' ||
+        pendingActionModeRef.current === 'strike_gunfire' ||
         (shiftKey && renderer.selectedEntityId)
       ) {
         const selected = renderer.selectedEntityId ? eng.entities.get(renderer.selectedEntityId) : undefined;
-        const mode: 'airstrike' | 'missile' =
-          pendingActionModeRef.current === 'strike_air'
+        const pending = pendingActionModeRef.current;
+        const mode: StrikeMode =
+          pending === 'strike_air'
             ? 'airstrike'
-            : pendingActionModeRef.current === 'strike_missile'
+            : pending === 'strike_missile'
               ? 'missile'
-              : selected?.kind === 'air'
-                ? 'airstrike'
-                : 'missile';
+              : pending === 'strike_direct'
+                ? 'direct'
+                : pending === 'strike_gunfire'
+                  ? 'gunfire'
+                  : selected?.kind === 'air'
+                    ? 'airstrike'
+                    : 'missile';
         const faction = selected?.faction ?? sandboxFactionRef.current;
-
         const allEntities = [...eng.entities.values()];
-        const attacker =
+
+        // الوحدة المفعّلة من لوحة الآليات هي التي تُطلق، ويبقى الإطلاق مفعّلاً حتى يوقفه الزر
+        const armedId = armedActorRef.current;
+        const armedUnit = armedId
+          ? selected?.actorId === armedId && selected.faction === faction
+            ? selected
+            : allEntities.find((e) => e.actorId === armedId && e.faction === faction)
+          : undefined;
+        if (armedId && !armedUnit) {
+          showToast('⚠️ ضع الوحدة على الخريطة أولاً، ثم اختر الهدف');
+          return;
+        }
+        const ability = armedId && reg.actors[armedId]?.fire?.mode === mode ? reg.actors[armedId]?.fire : undefined;
+
+        const legacyAttacker =
           mode === 'airstrike'
             ? (selected?.kind === 'air' && !selected.isMoving && !selected.pendingStrike
                 ? selected
@@ -508,6 +533,8 @@ export default function App() {
                       e.actorId === 'military_base')
                 );
 
+        const attacker = armedUnit ?? legacyAttacker;
+
         const fallbackFrom =
           mode === 'airstrike' && !attacker
             ? { x: Math.max(30, pt.x - 190), y: Math.max(30, pt.y - 120) }
@@ -521,6 +548,8 @@ export default function App() {
           mode,
           from: fallbackFrom,
           to: pt,
+          radius: ability?.radius,
+          color: ability?.color,
           faction
         });
         eng.flushOrders();
@@ -1195,6 +1224,31 @@ export default function App() {
         ? ''
         : `عدد المحافظات/المناطق: ${Object.keys(activeMap.zones).length}`;
 
+  const handleToggleAbility = (actorId: string) => {
+    const fire = registryRef.current?.actors[actorId]?.fire;
+    if (!fire) return;
+    if (armedActorRef.current === actorId) {
+      armedActorRef.current = null;
+      setArmedActorId(null);
+      setStrikeMode('none');
+      pendingActionModeRef.current = 'none';
+      return;
+    }
+    armedActorRef.current = actorId;
+    setArmedActorId(actorId);
+    setStrikeMode(fire.mode);
+    pendingActionModeRef.current =
+      fire.mode === 'airstrike'
+        ? 'strike_air'
+        : fire.mode === 'missile'
+          ? 'strike_missile'
+          : fire.mode === 'direct'
+            ? 'strike_direct'
+            : 'strike_gunfire';
+    setActiveTool('select');
+    showToast(`${fire.label}: اضغط على الهدف، واضغط الزر نفسه للإيقاف`);
+  };
+
   const renderStudioSidebar = (view: 'tools' | 'units') => (
       <StudioSidebar
         view={view}
@@ -1240,6 +1294,8 @@ export default function App() {
         activeTool={activeTool}
         onSelectTool={(tool) => {
           pendingActionModeRef.current = 'none';
+          armedActorRef.current = null;
+          setArmedActorId(null);
           setStrikeMode('none');
           setActiveTool(tool);
           if (tool === 'select' && rendererRef.current) {
@@ -1248,15 +1304,8 @@ export default function App() {
           }
         }}
         strikeMode={strikeMode}
-        onSelectStrikeMode={(mode) => {
-          const nextMode = strikeMode === mode ? 'none' : mode;
-          setStrikeMode(nextMode);
-          pendingActionModeRef.current =
-            nextMode === 'airstrike' ? 'strike_air' : nextMode === 'missile' ? 'strike_missile' : 'none';
-          if (nextMode !== 'none') {
-            setActiveTool('select');
-          }
-        }}
+        armedActorId={armedActorId}
+        onToggleAbility={(id) => handleToggleAbility(id)}
         sandboxFaction={sandboxFaction}
         onSelectFaction={setSandboxFaction}
         selectedEntityId={selectedEntityId}

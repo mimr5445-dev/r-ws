@@ -1,5 +1,14 @@
 export type Domain = 'land' | 'sea' | 'air';
 export type Faction = 'blue' | 'red' | 'neutral';
+export type StrikeMode = 'airstrike' | 'missile' | 'direct' | 'gunfire';
+
+export interface FireAbility {
+  mode: StrikeMode;
+  label: string;
+  radius: number;
+  color: string;
+}
+
 export type SoundId =
   | 'build_complete'
   | 'alert_ping'
@@ -8,7 +17,9 @@ export type SoundId =
   | 'jet_takeoff'
   | 'missile_launch'
   | 'explosion'
-  | 'ship_horn';
+  | 'ship_horn'
+  | 'cannon_fire'
+  | 'rifle_fire';
 
 // خلايا شبكة الملاحة: 0 = يابسة، 1 = ماء، 2 = عائق صلب، 3 = قناة / جسر مشترك
 export type NavCell = 0 | 1 | 2 | 3;
@@ -71,6 +82,7 @@ export interface ActorPack extends ActorTemplate {
   label: string;
   extends?: string;
   svg: string;
+  fire?: FireAbility;
 }
 
 export interface PackBundle {
@@ -96,7 +108,7 @@ export interface ScenarioStep {
   pulse?: { at: PointRef; color?: string; radius?: number };
   strike?: {
     attacker?: string;
-    mode: 'airstrike' | 'missile';
+    mode: StrikeMode;
     from?: PointRef;
     to: PointRef;
     radius?: number;
@@ -150,7 +162,7 @@ export interface EntityState {
   pendingStrike: {
     to: Point;
     radius: number;
-    mode: 'airstrike' | 'missile';
+    mode: StrikeMode;
     color: string;
     returnTo: Point;
   } | null;
@@ -158,7 +170,7 @@ export interface EntityState {
 
 export interface ProjectileState {
   id: string;
-  mode: 'bomb' | 'missile';
+  mode: 'bomb' | 'missile' | 'direct' | 'gunfire';
   x: number;
   y: number;
   prevX: number;
@@ -244,7 +256,7 @@ export type Order =
   | {
       type: 'strike';
       attackerId?: string;
-      mode: 'airstrike' | 'missile';
+      mode: StrikeMode;
       from?: Point;
       to: Point;
       radius?: number;

@@ -16,7 +16,7 @@ import {
   Volume2,
   VolumeX
 } from 'lucide-react';
-import { ActorPack, Faction, MapPack, SavedScenarioRecord, ValidationIssue } from '../core/types';
+import { ActorPack, Faction, MapPack, SavedScenarioRecord, StrikeMode, ValidationIssue } from '../core/types';
 import { MapEditTool, PackBuilderPanel } from './PackBuilderPanel';
 
 interface StudioSidebarProps {
@@ -68,8 +68,9 @@ interface StudioSidebarProps {
   actors: Record<string, ActorPack>;
   activeTool: string;
   onSelectTool: (tool: string) => void;
-  strikeMode: 'none' | 'airstrike' | 'missile';
-  onSelectStrikeMode: (mode: 'airstrike' | 'missile') => void;
+  strikeMode: 'none' | StrikeMode;
+  armedActorId: string | null;
+  onToggleAbility: (actorId: string) => void;
   sandboxFaction: Faction;
   onSelectFaction: (faction: Faction) => void;
   selectedEntityId: string | null;
@@ -172,7 +173,6 @@ export function StudioSidebar(props: StudioSidebarProps) {
     activeTool,
     onSelectTool,
     strikeMode,
-    onSelectStrikeMode,
     sandboxFaction,
     onSelectFaction,
     selectedEntityId,
@@ -250,7 +250,7 @@ export function StudioSidebar(props: StudioSidebarProps) {
               </div>
             </div>
 
-            <div id="sandboxBar" className="flex flex-wrap gap-1 max-h-36 overflow-y-auto pl-0.5">
+            <div id="sandboxBar" className="flex flex-wrap gap-1 max-h-72 overflow-y-auto pl-0.5">
               <button
                 type="button"
                 data-tool="select"
@@ -264,49 +264,36 @@ export function StudioSidebar(props: StudioSidebarProps) {
                 تحديد / تحريك
               </button>
               {Object.values(actors).map((act) => (
-                <button
-                  key={act.id}
-                  type="button"
-                  data-tool={act.id}
-                  onClick={() => onSelectTool(act.id)}
-                  className={`px-2 py-1 text-[11px] font-medium rounded-md border whitespace-nowrap shrink-0 transition-colors ${
-                    activeTool === act.id && strikeMode === 'none'
-                      ? 'bg-sky-600 border-sky-400 text-white'
-                      : 'bg-slate-900 border-slate-700 text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  + {act.label}
-                </button>
+                <div key={act.id} className="flex items-stretch gap-1 shrink-0">
+                  <button
+                    type="button"
+                    data-tool={act.id}
+                    onClick={() => onSelectTool(act.id)}
+                    className={`px-2 py-1 text-[11px] font-medium rounded-md border whitespace-nowrap transition-colors ${
+                      activeTool === act.id && strikeMode === 'none'
+                        ? 'bg-sky-600 border-sky-400 text-white'
+                        : 'bg-slate-900 border-slate-700 text-slate-200 hover:bg-slate-800'
+                    }`}
+                  >
+                    + {act.label}
+                  </button>
+                  {act.fire && (
+                    <button
+                      type="button"
+                      aria-pressed={props.armedActorId === act.id}
+                      title={act.fire.label}
+                      onClick={() => props.onToggleAbility(act.id)}
+                      className={`px-2 py-1 text-[11px] font-semibold rounded-md border whitespace-nowrap transition-colors ${
+                        props.armedActorId === act.id
+                          ? 'bg-red-700 border-red-300 text-white'
+                          : 'bg-slate-900 border-slate-700 text-amber-200 hover:bg-slate-800'
+                      }`}
+                    >
+                      {props.armedActorId === act.id ? '✖ إيقاف' : act.fire.label}
+                    </button>
+                  )}
+                </div>
               ))}
-            </div>
-
-            <div className="flex items-center gap-1.5 pt-0.5">
-              <button
-                type="button"
-                id="strikeAirBtn"
-                aria-pressed={strikeMode === 'airstrike'}
-                onClick={() => onSelectStrikeMode('airstrike')}
-                className={`flex-1 px-2 py-1 text-[11px] font-semibold rounded-md border whitespace-nowrap transition-colors ${
-                  strikeMode === 'airstrike'
-                    ? 'bg-amber-600 border-amber-300 text-white shadow-sm'
-                    : 'bg-slate-900 border-slate-700 text-amber-200 hover:bg-slate-800'
-                }`}
-              >
-                {strikeMode === 'airstrike' ? '✖ إيقاف القصف الجوي' : '✈️ أمر قصف جوي'}
-              </button>
-              <button
-                type="button"
-                id="strikeMissileBtn"
-                aria-pressed={strikeMode === 'missile'}
-                onClick={() => onSelectStrikeMode('missile')}
-                className={`flex-1 px-2 py-1 text-[11px] font-semibold rounded-md border whitespace-nowrap transition-colors ${
-                  strikeMode === 'missile'
-                    ? 'bg-red-700 border-red-300 text-white shadow-sm'
-                    : 'bg-slate-900 border-slate-700 text-red-200 hover:bg-slate-800'
-                }`}
-              >
-                {strikeMode === 'missile' ? '✖ إيقاف البالستي' : '🚀 إطلاق بالستي'}
-              </button>
             </div>
 
             {activeTool === 'select' && selectedEntityId && (
@@ -426,11 +413,9 @@ export function StudioSidebar(props: StudioSidebarProps) {
             )}
 
             <p className="text-[11px] text-slate-400 leading-4">
-              {strikeMode === 'airstrike'
-                ? 'وضع القصف المستمر مفعل: اضغط على عدة أهداف لتقلع الطائرات وتقصف ثم تعود لقاعدتها (اضغط الزر مجددًا أو Esc للإيقاف).'
-                : strikeMode === 'missile'
-                  ? 'وضع الإطلاق المستمر مفعل: اضغط عدة مواقع متتالية لإطلاق صواريخ بالستية (اضغط الزر مجددًا أو Esc للإيقاف).'
-                  : activeTool === 'select'
+              {strikeMode !== 'none'
+                ? 'وضع الإطلاق مفعّل: اضغط على الهدف في الخريطة. يبقى الإطلاق مفعّلاً حتى تضغط زر الوحدة مجدداً أو Esc.'
+                : activeTool === 'select'
                     ? selectedEntityId
                       ? `الوحدة المحددة: ${selectedEntityId} — اضغط على الوجهة للتحريك أو عدّل حجمها المنفرد أعلاه`
                       : 'اضغط على أي وحدة لتحديدها وتكبيرها/تصغيرها منفردة أو لتحريكها، أو اضغط على أي دولة لتحديدها.'
