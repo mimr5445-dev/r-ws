@@ -4,12 +4,15 @@
   "version": "0.2.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
+    "dev": "tsx server/index.ts",
+    "dev:vite": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",
+    "start": "NODE_ENV=production tsx server/index.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/core/core.test.ts src/packs/packSchema.test.ts"
+    "test": "tsx --test src/core/core.test.ts src/packs/packSchema.test.ts server/aiGateway.test.ts src/ai/scenarioAssist.test.ts src/components/aiPanel.render.test.ts",
+    "ai:check": "tsx server/checkEngines.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

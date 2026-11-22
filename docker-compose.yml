@@ -1,0 +1,38 @@
+# بيئة كاملة: التطبيق + محرّك ذكاء اصطناعي مفتوح المصدر محلي (Ollama)
+# التشغيل:   docker compose up -d
+# ثم مرة واحدة:  docker compose exec ollama ollama pull qwen2.5:7b-instruct
+# بدون أي مفتاح API على الإطلاق.
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: studio-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - "11434:11434" # اختياري: للوصول من الجهاز المضيف
+    # لتفعيل GPU (NVIDIA) أزل التعليق عن القسم التالي بعد تثبيت nvidia-container-toolkit
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  studio:
+    build: .
+    container_name: scenario-studio
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    environment:
+      AI_BASE_URL: "http://ollama:11434/v1"
+      AI_MODEL: "qwen2.5:7b-instruct"
+      PORT: "3000"
+      HOST: "0.0.0.0"
+    ports:
+      - "3000:3000"
+
+volumes:
+  ollama-models:

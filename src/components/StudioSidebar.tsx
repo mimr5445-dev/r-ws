@@ -17,6 +17,7 @@ import {
   VolumeX
 } from 'lucide-react';
 import { ActorPack, Faction, MapPack, SavedScenarioRecord, StrikeMode, ValidationIssue } from '../core/types';
+import { AiStudioPanel } from './AiStudioPanel';
 import { MapEditTool, PackBuilderPanel } from './PackBuilderPanel';
 
 interface StudioSidebarProps {
@@ -84,6 +85,9 @@ interface StudioSidebarProps {
   onChangeAiTopic: (val: string) => void;
   onCopyAiPrompt: () => void;
   onCopyCatalog: () => void;
+  // بوابة الذكاء الاصطناعي المفتوح (محلي بدون مفاتيح)
+  onApplyGeneratedYaml: (yamlText: string) => void;
+  onAiStatusNotice: (msg: string | null) => void;
   yamlText: string;
   onChangeYaml: (val: string) => void;
   onApplyYaml: () => void;
@@ -185,6 +189,8 @@ export function StudioSidebar(props: StudioSidebarProps) {
     onChangeAiTopic,
     onCopyAiPrompt,
     onCopyCatalog,
+    onApplyGeneratedYaml,
+    onAiStatusNotice,
     yamlText,
     onChangeYaml,
     onApplyYaml,
@@ -786,7 +792,21 @@ export function StudioSidebar(props: StudioSidebarProps) {
             </div>
           </section>
 
-          {/* 5. AI Prompt & Live YAML Editor */}
+          {/* 5. Open-source local AI copilot */}
+          <AiStudioPanel
+            maps={props.maps}
+            actors={actors}
+            activeMapId={props.activeMapId}
+            aiTopic={aiTopic}
+            onChangeAiTopic={onChangeAiTopic}
+            onApplyGeneratedYaml={onApplyGeneratedYaml}
+            onCopyAiPrompt={onCopyAiPrompt}
+            onCopyCatalog={onCopyCatalog}
+            onOpenSpec={onOpenSpec}
+            setStatusNotice={onAiStatusNotice}
+          />
+
+          {/* 6. AI Prompt & Live YAML Editor */}
           <section aria-label="محرر السيناريو" className="flex-1 flex flex-col gap-2 min-h-[210px]">
             <div className="flex items-center justify-between gap-2">
               <label htmlFor="yamlEditor" className="text-xs font-medium text-slate-400">
