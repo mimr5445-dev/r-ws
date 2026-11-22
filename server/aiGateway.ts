@@ -31,6 +31,14 @@ export interface GatewayOptions {
   defaultModel?: string;
   /** مهلة الاتصال بمحرّك النموذج بالمللي ثانية */
   timeoutMs?: number;
+  /**
+   * محرّك مشترك يعيش على الخادم (مثل خدمة Ollama مستضافة) ويُستخدم من الهاتف.
+   * المتصفح لا يحتاج عنوانه ولا مفتاحه: يكفي أن يرسل baseUrl = "server".
+   */
+  sharedBaseUrl?: string;
+  sharedModel?: string;
+  /** اختياري: مفتاح المحرّك المشترك يبقى على الخادم فقط ولا يُرسل للمتصفح */
+  sharedApiKey?: string;
 }
 
 const CHAT_COMPLETIONS_PATH = '/chat/completions';
@@ -161,6 +169,19 @@ export function createAiRouter(options: GatewayOptions = {}) {
   const envBaseUrl = normalizeBaseUrl(options.defaultBaseUrl ?? process.env.AI_BASE_URL ?? '');
   const envModel = options.defaultModel ?? process.env.AI_MODEL ?? '';
   const envKey = process.env.AI_API_KEY ?? '';
+  const sharedBaseUrl = normalizeBaseUrl(options.sharedBaseUrl ?? process.env.AI_SHARED_BASE_URL ?? '');
+  const sharedModel = options.sharedModel ?? process.env.AI_SHARED_MODEL ?? '';
+  const sharedKey = options.sharedApiKey ?? process.env.AI_SHARED_API_KEY ?? '';
+
+  /**
+   * يحوّل "server" إلى عنوان المحرّك المشترك المهيّأ في بيئة الخادم.
+   * هذا ما يسمح باستخدام الذكاء الاصطناعي من الهاتف: كل شيء يحدث على الخادم.
+   */
+  const resolveBaseUrl = (raw: unknown): string => {
+    const value = String(raw ?? '').trim();
+    if (value === 'server' || value === 'shared') return sharedBaseUrl;
+    return normalizeBaseUrl(value || envBaseUrl);
+  };
 
   const router = express.Router();
   router.use(express.json({ limit: '1mb' }));
@@ -168,15 +189,22 @@ export function createAiRouter(options: GatewayOptions = {}) {
   /** حالة المحرّكات: نفحص المحرّك المهيّأ بالبيئة + المنافذ الشائعة */
   router.get('/engines', async (_req: Request, res: Response) => {
     const candidates: EnginePreset[] = [];
-    if (envBaseUrl) candidates.push({ id: 'env', label: 'المحرّك المهيّأ في البيئة', baseUrl: envBaseUrl, model: envModel });
+    if (sharedBaseUrl) {
+      candidates.push({ id: 'shared', label: 'محرّك الخادم المشترك (للهاتف)', baseUrl: sharedBaseUrl, model: sharedModel });
+    }
+    if (envBaseUrl && envBaseUrl !== sharedBaseUrl) {
+      candidates.push({ id: 'env', label: 'المحرّك المهيّأ في البيئة', baseUrl: envBaseUrl, model: envModel });
+    }
     for (const p of presets) {
       if (envBaseUrl && normalizeBaseUrl(p.baseUrl) === envBaseUrl) continue;
+      if (sharedBaseUrl && normalizeBaseUrl(p.baseUrl) === sharedBaseUrl) continue;
       candidates.push(p);
     }
 
     const results = await Promise.all(
       candidates.map(async (p) => {
-        const models = await listModels(p.baseUrl, p.id === 'env' ? envKey : '', 2500);
+        const key = p.id === 'env' ? envKey : p.id === 'shared' ? sharedKey : '';
+        const models = await listModels(p.baseUrl, key, p.id === 'shared' ? 6000 : 2500);
         return {
           id: p.id,
           label: p.label,
@@ -192,25 +220,38 @@ export function createAiRouter(options: GatewayOptions = {}) {
       keyless: true,
       engines: results.filter((r) => r.online),
       checked: results,
-      defaults: { baseUrl: envBaseUrl, model: envModel }
+      defaults: { baseUrl: sharedBaseUrl || envBaseUrl, model: sharedModel || envModel },
+      shared: {
+        configured: Boolean(sharedBaseUrl),
+        usableFromPhone: Boolean(sharedBaseUrl),
+        baseUrl: sharedBaseUrl || null,
+        model: sharedModel || null
+      }
     });
   });
 
   /** جرد النماذج لمحرّك معيّن */
   router.post('/models', async (req: Request, res: Response) => {
-    const baseUrl = normalizeBaseUrl(String(req.body?.baseUrl ?? envBaseUrl));
+    const rawBase = String(req.body?.baseUrl ?? '');
+    const baseUrl = resolveBaseUrl(rawBase);
     if (!baseUrl) return res.status(400).json({ error: 'baseUrl مطلوب' });
-    const models = await listModels(baseUrl, String(req.body?.apiKey ?? envKey), 8000);
+    const key = rawBase === 'server' || rawBase === 'shared' ? sharedKey : String(req.body?.apiKey ?? envKey);
+    const models = await listModels(baseUrl, key, 8000);
     res.json({ baseUrl, models });
   });
 
   /** توليد كود سيناريو YAML من وصف عربي/إنجليزي */
   router.post('/scenario', async (req: Request, res: Response) => {
     const body = req.body ?? {};
-    const baseUrl = normalizeBaseUrl(String(body.baseUrl ?? envBaseUrl));
+    const rawBase = String(body.baseUrl ?? '');
+    const isShared = rawBase === 'server' || rawBase === 'shared';
+    const baseUrl = resolveBaseUrl(rawBase);
     if (!baseUrl) {
       return res.status(400).json({
-        error: 'لم يتم تحديد عنوان المحرّك. شغّل Ollama مثلًا (ollama serve) أو اضبط AI_BASE_URL.'
+        error: isShared
+          ? 'لم يُضبط محرّك الخادم المشترك. اضبط AI_SHARED_BASE_URL في بيئة الخادم (أو AI_BASE_URL).'
+          : 'لم يتم تحديد عنوان المحرّك. شغّل Ollama مثلًا (ollama serve) أو اضبط AI_BASE_URL.',
+        code: isShared ? 'SHARED_NOT_CONFIGURED' : 'NO_ENGINE'
       });
     }
     const system: string = body.system;
@@ -218,9 +259,9 @@ export function createAiRouter(options: GatewayOptions = {}) {
     if (!system || !user) {
       return res.status(400).json({ error: 'system و user مطلوبان لتوليد السيناريو' });
     }
-    const apiKey = String(body.apiKey ?? envKey ?? '');
+    const apiKey = isShared ? sharedKey : String(body.apiKey ?? envKey ?? '');
 
-    let model = String(body.model ?? envModel ?? '').trim();
+    let model = String(body.model ?? (isShared ? sharedModel : envModel) ?? '').trim();
     if (!model) {
       const models = await listModels(baseUrl, apiKey, 8000);
       model = models[0] ?? '';
@@ -276,6 +317,7 @@ export function createAiRouter(options: GatewayOptions = {}) {
       keyless: true,
       defaultBaseUrl: envBaseUrl || null,
       defaultModel: envModel || null,
+      sharedConfigured: Boolean(sharedBaseUrl),
       timeoutMs
     });
   });

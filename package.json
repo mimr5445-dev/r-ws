@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/core/core.test.ts src/packs/packSchema.test.ts server/aiGateway.test.ts src/ai/scenarioAssist.test.ts src/components/aiPanel.render.test.ts",
+    "test": "tsx --test src/core/core.test.ts src/packs/packSchema.test.ts server/aiGateway.test.ts src/ai/scenarioAssist.test.ts src/ai/vercelRoute.test.ts src/components/aiPanel.render.test.ts src/components/aiPanel.paste.test.ts",
     "ai:check": "tsx server/checkEngines.ts"
   },
   "dependencies": {

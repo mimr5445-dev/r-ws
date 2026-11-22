@@ -86,3 +86,84 @@ test('بوابة AI: /engines يكتشف محرّكًا وهميًا و /scenari
     await new Promise<void>((r) => fakeServer.close(() => r()));
   }
 });
+
+test('بوابة AI: المحرّك المشترك يُستخدم من الهاتف دون كشف المفتاح', async () => {
+  const fake = express();
+  fake.use(express.json());
+  const seenAuth: string[] = [];
+  fake.get('/v1/models', (req, res) => {
+    seenAuth.push(String(req.headers.authorization ?? ''));
+    res.json({ data: [{ id: 'shared-model' }] });
+  });
+  fake.post('/v1/chat/completions', (req, res) => {
+    seenAuth.push(String(req.headers.authorization ?? ''));
+    res.json({ choices: [{ message: { content: '```yaml\nmeta:\n  map: world_live\ntimeline: []\n```' } }] });
+  });
+  const fakeServer = await new Promise<http.Server>((resolve) => {
+    const s = fake.listen(0, '127.0.0.1', () => resolve(s));
+  });
+  const fakeBase = `http://127.0.0.1:${(fakeServer.address() as any).port}/v1`;
+
+  const app = express();
+  app.use(
+    '/api/ai',
+    createAiRouter({
+      presets: [],
+      sharedBaseUrl: fakeBase,
+      sharedModel: 'shared-model',
+      sharedApiKey: 'server-side-secret'
+    })
+  );
+  const server = await new Promise<http.Server>((resolve) => {
+    const s = app.listen(0, '127.0.0.1', () => resolve(s));
+  });
+  const base = `http://127.0.0.1:${(server.address() as any).port}/api/ai`;
+
+  try {
+    const engines: any = await (await fetch(`${base}/engines`)).json();
+    assert.equal(engines.shared.configured, true);
+    assert.equal(engines.shared.usableFromPhone, true);
+    const shared = engines.engines.find((e: any) => e.id === 'shared');
+    assert.ok(shared, 'المحرّك المشترك يجب أن يظهر كمتاح');
+    assert.deepEqual(shared.models, ['shared-model']);
+    // لا يجب أن يُسرَّب المفتاح إلى استجابة المتصفح
+    assert.ok(!JSON.stringify(engines).includes('server-side-secret'));
+
+    const genRes = await fetch(`${base}/scenario`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl: 'server', system: 's', user: 'u' })
+    });
+    const gen: any = await genRes.json();
+    assert.equal(genRes.status, 200, JSON.stringify(gen));
+    assert.equal(gen.model, 'shared-model');
+    assert.ok(gen.yaml.includes('world_live'));
+    // المفتاح يُضاف على الخادم فقط
+    assert.ok(seenAuth.every((h) => h === 'Bearer server-side-secret'));
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+    await new Promise<void>((r) => fakeServer.close(() => r()));
+  }
+});
+
+test('بوابة AI: baseUrl=server بدون إعداد يعطي خطأ واضحًا', async () => {
+  const app = express();
+  app.use('/api/ai', createAiRouter({ presets: [] }));
+  const server = await new Promise<http.Server>((resolve) => {
+    const s = app.listen(0, '127.0.0.1', () => resolve(s));
+  });
+  const base = `http://127.0.0.1:${(server.address() as any).port}/api/ai`;
+  try {
+    const res = await fetch(`${base}/scenario`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl: 'server', system: 's', user: 'u' })
+    });
+    const body: any = await res.json();
+    assert.equal(res.status, 400);
+    assert.equal(body.code, 'SHARED_NOT_CONFIGURED');
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
