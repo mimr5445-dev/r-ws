@@ -22,7 +22,8 @@ test('AiStudioPanel يرسم لوحة الذكاء الاصطناعي المحل
     })
   );
   assert.ok(html.includes('aiStudioPanel'));
-  assert.ok(html.includes('ذكاء اصطناعي محلي'));
+  assert.ok(html.includes('ذكاء اصطناعي مفتوح المصدر'));
+  assert.ok(html.includes('لصق'));
   assert.ok(html.includes('حصار بحري'));
   assert.ok(html.includes('http://127.0.0.1:11434/v1'));
   assert.ok(html.includes('aiGenerateBtn'));

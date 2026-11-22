@@ -16,7 +16,16 @@ export interface AiEnginesResponse {
   engines: AiEngine[];
   checked: AiEngine[];
   defaults: { baseUrl: string; model: string };
+  shared: {
+    configured: boolean;
+    usableFromPhone: boolean;
+    baseUrl: string | null;
+    model: string | null;
+  };
 }
+
+/** قيمة خاصة تعني: استخدم محرّك الخادم المشترك (لا يحتاج الهاتف أي عنوان أو مفتاح) */
+export const SHARED_ENGINE = 'server';
 
 export interface AiScenarioRequest {
   baseUrl: string;
@@ -71,7 +80,8 @@ export async function fetchAiEngines(signal?: AbortSignal): Promise<AiEnginesRes
     keyless: data.keyless !== false,
     engines: Array.isArray(data.engines) ? data.engines : [],
     checked: Array.isArray(data.checked) ? data.checked : [],
-    defaults: data.defaults ?? { baseUrl: '', model: '' }
+    defaults: data.defaults ?? { baseUrl: '', model: '' },
+    shared: data.shared ?? { configured: false, usableFromPhone: false, baseUrl: null, model: null }
   };
 }
 
