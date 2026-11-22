@@ -1161,6 +1161,12 @@ export default function App() {
     setStatusNotice(ok ? 'تم نسخ البرومبت + الفهرس بالكامل للخرائط والمحافظات!' : 'تعذّر الوصول للحافظة');
   };
 
+  // Open-source AI copilot: apply the generated YAML through the same deterministic path
+  const handleApplyGeneratedYaml = (generated: string) => {
+    setYamlText(generated);
+    void loadScenario(generated, 'تم توليد السيناريو بالذكاء الاصطناعي المحلي وتشغيله');
+  };
+
   // Audio + Video WebM recording
   const handleToggleRecord = () => {
     const renderer = rendererRef.current;
@@ -1324,6 +1330,8 @@ export default function App() {
         onChangeAiTopic={setAiTopic}
         onCopyAiPrompt={handleCopyAiPrompt}
         onCopyCatalog={handleCopyCatalog}
+        onApplyGeneratedYaml={handleApplyGeneratedYaml}
+        onAiStatusNotice={setStatusNotice}
         yamlText={yamlText}
         onChangeYaml={(val) => {
           setYamlText(val);
